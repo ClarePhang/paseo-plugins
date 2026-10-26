@@ -1,6 +1,6 @@
 // Development-only synthetic token ledger (Token 页 / 实时流速). Deterministic per day; the live feed is a function of
 // the clock so the chart moves the way the real one does. Magnitudes are those of a busy Claude Code / Codex user who
-// also runs Grok CLI and Pi (2.14).
+// also runs Grok CLI, Pi and oh-my-pi (2.14, 2.18).
 import { addTokenCounts, emptyTokenCounts, tokenSourceNames } from "../shared/tokens";
 import { statsRangeDays, vendorOf } from "../shared/stats";
 
