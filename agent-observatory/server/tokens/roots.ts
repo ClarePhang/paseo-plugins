@@ -29,10 +29,9 @@ const CONFIG_ENV: Record<TokenSource, ReadonlyArray<{ name: string; folders: rea
   codex: [{ name: "CODEX_HOME", folders: ["sessions", "archived_sessions"], standard: home => join(home, ".codex") }],
   grok: [{ name: "GROK_HOME", folders: ["sessions"], standard: home => join(home, ".grok") }],
   pi: [{ name: "PI_CODING_AGENT_SESSION_DIR", folders: [""], standard: null }, { name: "PI_CODING_AGENT_DIR", folders: ["sessions"], standard: home => join(home, ".pi", "agent") }],
-  // oh-my-pi honours Pi's variables under its own home (PI_CONFIG_DIR names it, `.omp` unless set).
-  omp: [{ name: "PI_CODING_AGENT_SESSION_DIR", folders: [""], standard: null },
-    { name: "PI_CODING_AGENT_DIR", folders: ["sessions"], standard: home => join(home, ".omp", "agent") },
-    { name: "PI_CONFIG_DIR", folders: ["agent/sessions"], standard: home => join(home, ".omp") }],
+  // oh-my-pi honours Pi's variables; PI_CONFIG_DIR (its home, `.omp` unless set) moves the default roots in
+  // `defaultRoots` only — providerRoots reads the first two entries, the session directory and the agent directory, as for Pi.
+  omp: [{ name: "PI_CODING_AGENT_SESSION_DIR", folders: [""], standard: null }, { name: "PI_CODING_AGENT_DIR", folders: ["sessions"], standard: home => join(home, ".omp", "agent") }],
 };
 /** Directories one variable may name when the text cannot tell which assignment wins (the latest ones are kept). */
 const MAX_CANDIDATES = 3;

@@ -268,7 +268,7 @@ test("discovery failures leave the default roots working", async () => {
   } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("Grok and Pi providers that move their logs add roots: GROK_HOME, Pi's session directory over its agent directory, and Pi's settings", async () => {
+test("Grok and Pi providers that move their logs add roots: GROK_HOME, Pi's session directory over its agent directory, Pi's settings, and oh-my-pi like Pi", async () => {
   const texts: Record<string, string> = {
     "/home/user/bin/grok-team": "#!/bin/sh\nexport GROK_HOME=/home/user/.grok-team\nexec grok \"$@\"\n",
     "/home/user/.pi-work/settings.json": JSON.stringify({ theme: "dark", sessionDir: "~/pi-sessions" }),
@@ -283,6 +283,9 @@ test("Grok and Pi providers that move their logs add roots: GROK_HOME, Pi's sess
     "pi-agent": { extends: "pi", env: { PI_CODING_AGENT_DIR: "/srv/pi-agent" } },
     "pi-work": { extends: "pi", command: ["env", "PI_CODING_AGENT_DIR=~/.pi-work", "pi"] },
     pi: {},
+    "omp-sessions": { extends: "omp", env: { PI_CODING_AGENT_SESSION_DIR: "/srv/omp-sessions" } },
+    "omp-team": { extends: "omp", env: { PI_CODING_AGENT_DIR: "/srv/omp-agent" } },
+    "omp-acp": { extends: "acp", command: ["omp", "agent", "stdio"] },
     kimi: { extends: "acp", command: ["kimi", "acp"], env: { GROK_HOME: "/never" } },
   }, { home: HOME, env: {}, readText: async path => { reads.push(path); return texts[path] ?? null; } });
   assert.deepEqual(roots, [
@@ -291,6 +294,8 @@ test("Grok and Pi providers that move their logs add roots: GROK_HOME, Pi's sess
     { source: "pi", path: "/srv/pi-sessions", provider: "pi-sessions", via: "env" },
     { source: "pi", path: "/srv/pi-agent/sessions", provider: "pi-agent", via: "env" },
     { source: "pi", path: "/home/user/pi-sessions", provider: "pi-work", via: "settings" },
+    { source: "omp", path: "/srv/omp-sessions", provider: "omp-sessions", via: "env" },
+    { source: "omp", path: "/srv/omp-agent/sessions", provider: "omp-team", via: "env" },
   ]);
   assert.ok(!reads.some(path => path.includes("kimi")), "a provider whose logs are not read is not looked into");
   assert.ok(reads.every(path => !/auth|credential/i.test(path)), "no credentials are ever opened");
