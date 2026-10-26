@@ -23,7 +23,7 @@ export function subagentParent(source: unknown): string | null {
 }
 /** Grok keeps one directory per session (`<encoded cwd>/<session id>/usage.json`); the directory is the session id. */
 export const GROK_USAGE_FILE = "usage.json";
-/** A Pi session log is `<time>_<session id>.jsonl`, the id as in its `session` header. */
+/** A Pi or oh-my-pi session log is `<time>_<session id>.jsonl`, the id as in its `session` header. */
 function piSessionId(name: string): string {
   const id = name.slice(name.lastIndexOf("_") + 1);
   return id && id !== name && /^[A-Za-z0-9-]{8,256}$/.test(id) ? id : name;
@@ -39,7 +39,7 @@ function piCreatedAt(path: string): number | null {
 export function initialParser(path: string, parentSession: string | null, source?: TokenSource): ParserState {
   const name = basename(path, ".jsonl");
   const grok = source === "grok" || (source === undefined && basename(path) === GROK_USAGE_FILE);
-  const sessionId = parentSession ?? (grok ? basename(dirname(path)) : source === "pi" ? piSessionId(name)
+  const sessionId = parentSession ?? (grok ? basename(dirname(path)) : source === "pi" || source === "omp" ? piSessionId(name)
     : name.startsWith("rollout-") ? name.match(/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i)?.[1] ?? name : name);
   return { sessionId: sessionId.slice(0, 256), cwd: "", model: null, inputAt: null, lastTotal: null, open: null, openInputAt: null,
     sessions: [sessionId.slice(0, 256)], links: [], hasForks: false, metaSeen: false, pendingRecord: false, legacySessionId: sessionId.slice(0, 256), parentThread: null };
@@ -59,15 +59,16 @@ function emit(file: LogFile, candidate: Candidate, start: number | null, sink: C
 }
 
 /**
- * Pi (2.14), counted as Pi totals a session (`core/usage-totals`): every assistant message, a tool result carrying the
- * usage of LLM work it did, and a compaction or branch summary's own usage. A compaction's `retainedTail` holds copies of
- * earlier messages and is never read. An assistant entry's timestamp is written when the response ends and its message's
- * `timestamp` when the request started. A response is keyed by its provider response id, so the copies a `/fork` or
- * `/clone` writes into a new session count once; usage without a model name (tool results, summaries) is the session's
+ * Pi (2.14) and oh-my-pi (2.18), counted as each totals a session (`core/usage-totals`): every assistant message, a tool
+ * result carrying the usage of LLM work it did, a compaction or branch summary's own usage and, in oh-my-pi, a
+ * `model_usage` entry's (a call outside the transcript, under the model it names). A compaction's `retainedTail` holds
+ * copies of earlier messages and is never read. An assistant entry's timestamp is written when the response ends and its
+ * message's `timestamp` when the request started. A response is keyed by its provider response id, so the copies a `/fork`
+ * or `/clone` writes into a new session count once; usage without a model name (tool results, summaries) is the session's
  * current model's.
  */
 function parsePiLine(line: string, file: LogFile, sink: CallSink): void {
-  if (!/"type"\s*:\s*"(?:session|message|compaction|branch_summary|model_change)"/.test(line)) return;
+  if (!/"type"\s*:\s*"(?:session|message|compaction|branch_summary|model_change|model_usage)"/.test(line)) return;
   let row: ObjectValue;
   try { row = object(JSON.parse(line)); } catch { return; }
   const state = file.state;
@@ -90,15 +91,15 @@ function parsePiLine(line: string, file: LogFile, sink: CallSink): void {
       model = text(message.responseModel, 240) || text(message.model, 240) || state.model; state.model = model;
       start = typeof message.timestamp === "number" && Number.isFinite(message.timestamp) ? message.timestamp : null;
       const response = text(message.responseId, 1024);
-      key = response ? ["pi", response] : ["pi", entry, text(row.timestamp, 64)];
-    } else if (message.role === "toolResult") key = ["pi", "tool", entry, text(row.timestamp, 64)];
+      key = response ? [file.source, response] : [file.source, entry, text(row.timestamp, 64)];
+    } else if (message.role === "toolResult") key = [file.source, "tool", entry, text(row.timestamp, 64)];
     else return;
     usage = object(message.usage);
-  } else { usage = object(row.usage); key = ["pi", row.type, entry, text(row.timestamp, 64)]; }
+  } else { usage = object(row.usage); model = text(row.model, 240) || model; key = [file.source, row.type, entry, text(row.timestamp, 64)]; }
   const input = count(usage.input), cacheWrite = count(usage.cacheWrite), cacheRead = count(usage.cacheRead), output = count(usage.output);
   // Failed requests write an all-zero usage: no tokens, and not a call that produced anything.
   if (!input && !cacheWrite && !cacheRead && !output) return;
-  const call: LedgerCall = { key: callKey(key), source: "pi", sessionId: state.sessionId, cwd: state.cwd, model, at, start: validStart(start, at),
+  const call: LedgerCall = { key: callKey(key), source: file.source, sessionId: state.sessionId, cwd: state.cwd, model, at, start: validStart(start, at),
     input, cacheWrite, cacheRead, output, reasoning: Math.min(output, count(usage.reasoning)), subagent: false };
   // In a fork, what predates the fork itself is a copy: the ingester reads it after every original (r3-F4). A fork whose log name
   // carries no time has every entry treated so; its own replies are still counted, only after the originals.
@@ -138,7 +139,7 @@ export function parseGrokUsage(content: string, file: LogFile, sink: CallSink): 
 
 /** A cheap discriminator precedes JSON.parse; parsed objects never escape this function. */
 export function parseLine(line: string, file: LogFile, sink: CallSink): void {
-  if (file.source === "pi") { parsePiLine(line, file, sink); return; }
+  if (file.source === "pi" || file.source === "omp") { parsePiLine(line, file, sink); return; }
   if (file.source === "grok") return; // a JSON document, not lines: parseGrokUsage
   if (file.source === "claude") {
     if (!/"type"\s*:\s*"(?:assistant|user)"/.test(line)) return;

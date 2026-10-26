@@ -6,10 +6,10 @@ import { MAX_TOKEN_ROOTS, type TokenSource } from "../../shared/tokens";
 import type { LogRoot } from "./types";
 
 /**
- * Where provider session logs live. The defaults cover Claude Code, Codex, Grok CLI and Pi as installed; custom Paseo
- * providers built on them (`extends: "claude" | "codex" | "pi"`, or `extends: "acp"` running the `grok` CLI) can move
+ * Where provider session logs live. The defaults cover Claude Code, Codex, Grok CLI, Pi and oh-my-pi as installed; custom Paseo
+ * providers built on them (`extends: "claude" | "codex" | "pi" | "omp"`, or `extends: "acp"` running the `grok` CLI) can move
  * their logs with `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `GROK_HOME` / `PI_CODING_AGENT_SESSION_DIR` /
- * `PI_CODING_AGENT_DIR`, set in the provider's `env`, on its command line or in its launcher script. All are read here
+ * `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR`, set in the provider's `env`, on its command line or in its launcher script. All are read here
  * without running anything, in the order the provider's process gets them (codex-obs-roots-F1): the daemon's own
  * environment, the provider's `env` over it (the spawn's starting environment), then `env NAME=…` or an inline script on
  * the command line, then the launcher's assignments, each replacing what came before. Values count only as literal paths;
@@ -29,6 +29,10 @@ const CONFIG_ENV: Record<TokenSource, ReadonlyArray<{ name: string; folders: rea
   codex: [{ name: "CODEX_HOME", folders: ["sessions", "archived_sessions"], standard: home => join(home, ".codex") }],
   grok: [{ name: "GROK_HOME", folders: ["sessions"], standard: home => join(home, ".grok") }],
   pi: [{ name: "PI_CODING_AGENT_SESSION_DIR", folders: [""], standard: null }, { name: "PI_CODING_AGENT_DIR", folders: ["sessions"], standard: home => join(home, ".pi", "agent") }],
+  // oh-my-pi honours Pi's variables under its own home (PI_CONFIG_DIR names it, `.omp` unless set).
+  omp: [{ name: "PI_CODING_AGENT_SESSION_DIR", folders: [""], standard: null },
+    { name: "PI_CODING_AGENT_DIR", folders: ["sessions"], standard: home => join(home, ".omp", "agent") },
+    { name: "PI_CONFIG_DIR", folders: ["agent/sessions"], standard: home => join(home, ".omp") }],
 };
 /** Directories one variable may name when the text cannot tell which assignment wins (the latest ones are kept). */
 const MAX_CANDIDATES = 3;
@@ -54,6 +58,7 @@ export interface RootContext {
 }
 
 const piAgentDir = (home: string, env: RootContext["env"]): string => env.PI_CODING_AGENT_DIR || join(home, ".pi", "agent");
+const ompAgentDir = (home: string, env: RootContext["env"]): string => env.PI_CODING_AGENT_DIR || join(home, env.PI_CONFIG_DIR || ".omp", "agent");
 
 /** The roots checked on every host: the daemon's own environment, then the standard locations. */
 export function defaultRoots(context: Pick<RootContext, "home" | "env"> = { home: homedir(), env: process.env }): LogRoot[] {
@@ -68,6 +73,10 @@ export function defaultRoots(context: Pick<RootContext, "home" | "env"> = { home
     { source: "grok", path: join(home, ".grok", "sessions") },
     { source: "pi", path: env.PI_CODING_AGENT_SESSION_DIR || join(piAgentDir(home, env), "sessions") },
     { source: "pi", path: join(home, ".pi", "agent", "sessions") },
+    // 2.18: oh-my-pi. A PI_CODING_AGENT_DIR or PI_CODING_AGENT_SESSION_DIR set for Pi is where it writes too: the
+    // duplicates above are dropped, and those sessions count once, as Pi.
+    { source: "omp", path: env.PI_CODING_AGENT_SESSION_DIR || join(ompAgentDir(home, env), "sessions") },
+    { source: "omp", path: join(home, ".omp", "agent", "sessions") },
   ];
   return roots.filter((root, index) => roots.findIndex(other => resolve(other.path) === resolve(root.path)) === index);
 }
@@ -168,15 +177,15 @@ function commandPrograms(command: unknown): string[] {
   return words.filter((word): word is string => !!word);
 }
 /** An ACP provider's CLI by its command's name: `grok`, `grok-cli`, a renamed `grok-…` binary or script. */
-const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^grok(?:$|[-_.])/i, "grok"], [/^pi(?:$|[-_.])/, "pi"]];
+const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^grok(?:$|[-_.])/i, "grok"], [/^pi(?:$|[-_.])/, "pi"], [/^omp(?:$|[-_.])/, "omp"]];
 /**
- * The log format a provider writes: its own id or the built-in it extends (`claude`, `codex`, `pi`); for an ACP provider
- * (`extends: "acp"`) the CLI its command runs (2.14), past `env`, assignments and interpreters (`commandPrograms`). Null for
- * the others (their logs are not read).
+ * The log format a provider writes: its own id or the built-in it extends (`claude`, `codex`, `pi`, `omp`); for an ACP
+ * provider (`extends: "acp"`) the CLI its command runs (2.14), past `env`, assignments and interpreters (`commandPrograms`).
+ * Null for the others (their logs are not read).
  */
 export function providerSource(id: string, entry: { extends?: unknown; command?: unknown }): TokenSource | null {
   const base = typeof entry.extends === "string" && entry.extends.trim() ? entry.extends.trim() : id;
-  if (base === "claude" || base === "codex" || base === "pi") return base;
+  if (base === "claude" || base === "codex" || base === "pi" || base === "omp") return base;
   if (base !== "acp") return null;
   for (const word of commandPrograms(entry.command)) {
     const name = basename(word), source = ACP_COMMANDS.find(([pattern]) => pattern.test(name))?.[1];

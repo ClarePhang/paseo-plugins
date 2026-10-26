@@ -19,17 +19,26 @@ const line = (row: unknown) => JSON.stringify(row) + "\n";
 const response = (id: string, at: number) => ({ type: "assistant", timestamp: iso(at), sessionId: `session-${id}`, cwd: "/work/demo-project", requestId: `request-${id}`,
   message: { id, model: "claude-opus-5-5", content: "PRIVATE_OUTPUT", usage: { input_tokens: 10, cache_creation_input_tokens: 20, cache_read_input_tokens: 30, output_tokens: 40 } } });
 
-test("default roots follow the daemon's environment, then the standard locations, without duplicates; Codex's archive, Grok and Pi are read too", () => {
+test("default roots follow the daemon's environment, then the standard locations, without duplicates; Codex's archive, Grok, Pi and oh-my-pi are read too", () => {
   assert.deepEqual(defaultRoots({ home: HOME, env: {} }), [
     { source: "claude", path: "/home/user/.claude/projects" }, { source: "claude", path: "/home/user/.config/claude/projects" },
     { source: "codex", path: "/home/user/.codex/sessions" }, { source: "codex", path: "/home/user/.codex/archived_sessions" },
-    { source: "grok", path: "/home/user/.grok/sessions" }, { source: "pi", path: "/home/user/.pi/agent/sessions" }]);
+    { source: "grok", path: "/home/user/.grok/sessions" }, { source: "pi", path: "/home/user/.pi/agent/sessions" },
+    { source: "omp", path: "/home/user/.omp/agent/sessions" }]);
   assert.deepEqual(defaultRoots({ home: HOME, env: { CLAUDE_CONFIG_DIR: "/srv/claude", CODEX_HOME: "/srv/codex", GROK_HOME: "/srv/grok", PI_CODING_AGENT_DIR: "/srv/pi" } }).map(root => root.path),
     ["/srv/claude/projects", "/home/user/.claude/projects", "/home/user/.config/claude/projects", "/srv/codex/sessions", "/srv/codex/archived_sessions",
-      "/srv/grok/sessions", "/home/user/.grok/sessions", "/srv/pi/sessions", "/home/user/.pi/agent/sessions"]);
+      "/srv/grok/sessions", "/home/user/.grok/sessions", "/srv/pi/sessions", "/home/user/.pi/agent/sessions", "/home/user/.omp/agent/sessions"],
+    "a PI_CODING_AGENT_DIR set for Pi is where oh-my-pi writes too: one root, counted as Pi");
   // Pi's session directory can be named itself; it wins over the agent directory.
   assert.deepEqual(defaultRoots({ home: HOME, env: { PI_CODING_AGENT_DIR: "/srv/pi", PI_CODING_AGENT_SESSION_DIR: "/srv/pi-sessions" } }).filter(root => root.source === "pi").map(root => root.path),
     ["/srv/pi-sessions", "/home/user/.pi/agent/sessions"]);
+  // oh-my-pi: the same variables, under its own home (PI_CONFIG_DIR names it), before its standard location.
+  assert.deepEqual(defaultRoots({ home: HOME, env: { PI_CONFIG_DIR: ".omp-work" } }).filter(root => root.source === "omp").map(root => root.path),
+    ["/home/user/.omp-work/agent/sessions", "/home/user/.omp/agent/sessions"]);
+  assert.deepEqual(defaultRoots({ home: HOME, env: { PI_CODING_AGENT_DIR: "/srv/omp", PI_CONFIG_DIR: ".omp-work" } }).filter(root => root.source === "omp").map(root => root.path),
+    ["/home/user/.omp/agent/sessions"], "the directory PI_CODING_AGENT_DIR names is Pi's root too, so it counts once, as Pi; PI_CONFIG_DIR is not followed when the agent directory is set");
+  assert.deepEqual(defaultRoots({ home: HOME, env: { PI_CODING_AGENT_SESSION_DIR: "/srv/pi-sessions" } }).filter(root => root.source === "omp").map(root => root.path),
+    ["/home/user/.omp/agent/sessions"], "a session directory shared with Pi counts once, as Pi");
 });
 
 test("only literal absolute paths are accepted; ~ and $HOME expand at the start", () => {
@@ -50,6 +59,11 @@ test("a provider writes Claude Code, Codex, Pi or Grok CLI logs when it is one o
   // 2.14: Pi (built in or extended), and an ACP provider by the CLI its command runs.
   assert.equal(providerSource("pi", {}), "pi");
   assert.equal(providerSource("pi-work", { extends: "pi" }), "pi");
+  // 2.18: oh-my-pi, built in (provider id omp), extended, or run over ACP.
+  assert.equal(providerSource("omp", {}), "omp");
+  assert.equal(providerSource("omp-work", { extends: "omp" }), "omp");
+  assert.equal(providerSource("my-omp", { extends: "acp", command: ["omp", "agent", "stdio"] }), "omp");
+  assert.equal(providerSource("omp-team", { extends: "acp", command: ["/opt/bin/omp-acp"] }), "omp");
   assert.equal(providerSource("my-grok", { extends: "acp", command: ["/opt/bin/grok", "agent", "stdio"] }), "grok");
   assert.equal(providerSource("grok-team", { extends: "acp", command: ["grok-cli", "agent", "stdio"] }), "grok");
   assert.equal(providerSource("xai", { extends: "acp", command: ["/home/me/bin/grok-wrapper", "agent", "stdio"] }), "grok");

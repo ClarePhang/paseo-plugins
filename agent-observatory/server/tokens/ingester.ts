@@ -334,7 +334,7 @@ export class TokenIngester {
     for (const file of files) {
       if (this.closed) return;
       if (file.imported) continue;
-      if (file.state.hasForks && (file.source === "claude" || file.source === "pi")) {
+      if (file.state.hasForks && (file.source === "claude" || file.source === "pi" || file.source === "omp")) {
         const second: LogFile = { ...file, offset: 0, state: initialParser(file.path, file.parentSession, file.source) };
         await this.read(second, "fork");
         if (second.state.open?.accepted) file.state.open = second.state.open;
