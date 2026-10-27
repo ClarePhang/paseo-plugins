@@ -24,7 +24,7 @@ export async function readHermesStateDb(file: LogFile, sink: CallSink, onBytes?:
     const rows = db.prepare(
       "SELECT m.session_id AS sessionId, m.model AS model, m.api_call_count AS calls, m.input_tokens AS input, m.output_tokens AS output, " +
       "m.cache_read_tokens AS cacheRead, m.cache_write_tokens AS cacheWrite, m.reasoning_tokens AS reasoning, " +
-      "m.last_seen AS lastSeen, s.parent_id AS parent, s.cwd AS cwd FROM session_model_usage m " +
+      "m.last_seen AS lastSeen, s.parent_session_id AS parent, s.cwd AS cwd FROM session_model_usage m " +
       "JOIN sessions s ON s.id = m.session_id WHERE s.ended_at IS NOT NULL",
     ).all() as Array<Record<string, unknown>>;
     for (const row of rows) {

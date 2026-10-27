@@ -24,7 +24,7 @@ async function ingest(roots: (root: string) => LogRoot[], run: (root: string, in
 
 test("Hermes: closed sessions emit their per-model aggregates; open sessions and model-less rows wait", () => ingest(root => [{ source: "hermes", path: root }], async (root, ingester, calls) => {
   const db = new DatabaseSync(join(root, "state.db"));
-  db.exec("CREATE TABLE sessions (id text PRIMARY KEY, parent_id text, cwd text, ended_at real, started_at real)");
+  db.exec("CREATE TABLE sessions (id text PRIMARY KEY, parent_session_id text, cwd text, ended_at real, started_at real)");
   db.exec("CREATE TABLE session_model_usage (session_id text, model text, api_call_count integer, input_tokens integer, output_tokens integer, cache_read_tokens integer, cache_write_tokens integer, reasoning_tokens integer, first_seen real, last_seen real)");
   const session = (id: string, parent: string | null, ended: number | null) => db.prepare("INSERT INTO sessions VALUES (?, ?, '/home/me/app', ?, ?)").run(id, parent, ended, NOW - 3_600_000);
   const usage = (session: string, model: string, calls: number, input: number, out: number, read: number, write: number, reason: number, seen: number) =>
