@@ -3,9 +3,10 @@ import { lstat, readdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { setImmediate as yieldLoop } from "node:timers/promises";
 import { GROK_USAGE_FILE, initialParser, subagentParent } from "./parser";
+import { isOpendencodeDb, OPENCODE_DB_FILE, readOpendencodeDb } from "./opencode-db";
 import { readFirstLine, tailFile } from "./reader";
 import { defaultRoots, isInsightDirectory, MAX_ROOTS } from "./roots";
-import { DAY, safeError, type Backfill, type Candidate, type LedgerCall, type LogFile, type LogRoot, type ParserState } from "./types";
+import { DAY, safeError, type Backfill, type CallSink, type Candidate, type LedgerCall, type LogFile, type LogRoot, type ParserState } from "./types";
 import { TOKEN_IMPORT_LIMITS, type TokenImportLimits } from "../../shared/tokens";
 /** Work and memory budgets (TOKEN_IMPORT_LIMITS): logs tracked, their total bytes, dedupe keys and directory entries per scan. */
 export type IngesterLimits = TokenImportLimits;
@@ -209,7 +210,29 @@ export class TokenIngester {
           }
         }
       };
-      await (root.source === "grok" ? scanGrok() : walk(root.path, 0));
+      // OpenCode: the database (`opencode.db`, ≥ 1.2) holds every session; the legacy `storage/message/<session>/<message>.json`
+      // tree (before 1.2, and what a migration can leave behind) is read beside it. The message ids both carry deduplicate them.
+      const scanOpenCode = async (): Promise<void> => {
+        const database = join(root.path, OPENCODE_DB_FILE);
+        let details: Stats | null = null;
+        try { details = await lstat(database); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") root.error = safeError(error); }
+        if (details?.isFile()) { if (!visit()) return; await note(database, details); }
+        const legacy = join(root.path, "storage", "message");
+        for (const session of await list(legacy) ?? []) {
+          if (!visit() || !session.isDirectory()) continue;
+          for (const message of await list(join(legacy, session.name)) ?? []) {
+            if (!visit()) return;
+            if (!message.name.endsWith(".json")) continue;
+            const path = join(legacy, session.name, message.name);
+            let stats: Stats | null = null;
+            try { stats = await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") root.error = safeError(error); }
+            if (stats?.isFile()) await note(path, stats);
+            await pause();
+          }
+          await pause();
+        }
+      };
+      await (root.source === "grok" ? scanGrok() : root.source === "opencode" ? scanOpenCode() : walk(root.path, 0));
       // A late root listed for the first time: the logs it holds now are its history (marked fresh below), later ones are new.
       if (listed) { this.lateRoots.delete(rootIndex); this.listedRoots.add(rootIndex); }
       else if (this.listedRoots.has(rootIndex)) this.rootLosses.set(root.source, this.now());
@@ -257,13 +280,20 @@ export class TokenIngester {
   }
   private async read(file: LogFile, phase: "original" | "fork" | "all", progress = false): Promise<void> {
     const oldState = file.state, fresh = !file.imported && this.freshFiles.has(file.path);
+    const sink: CallSink = (call, previous, _file, settled) => this.consume(call, previous, phase, settled, fresh);
+    const onBytes = (bytes: number) => {
+      this.diagnostics.bytesRead += bytes;
+      if (progress) this.backfill.bytesDone = Math.min(this.backfill.bytes, this.backfill.bytesDone + bytes);
+    };
     try {
+      // OpenCode's database is not read as bytes: its rows past the watermark are queried read-only (opencode-db).
+      if (isOpendencodeDb(file)) {
+        if (await readOpendencodeDb(file, sink, onBytes)) this.changed();
+        return;
+      }
       // Read again from the start (replaced, cut short, rewritten): what was read of it before is gone, noted before the index takes
       // in the new file, so a marker read while this read goes never vouches for it (codex-obs-resume-recheck6-F1).
-      if (await tailFile(file, (call, previous, _file, settled) => this.consume(call, previous, phase, settled, fresh), bytes => {
-        this.diagnostics.bytesRead += bytes;
-        if (progress) this.backfill.bytesDone = Math.min(this.backfill.bytes, this.backfill.bytesDone + bytes);
-      }, lost => this.noteLoss(file, lost))) this.changed();
+      if (await tailFile(file, sink, onBytes, lost => this.noteLoss(file, lost))) this.changed();
     } catch (error) { const root = this.roots[file.root]; if (root) root.error = safeError(error); this.changed(); }
     finally {
       if (file.state !== oldState && oldState.open?.accepted) this.options.onSettle?.(oldState.open.call);

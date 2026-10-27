@@ -32,6 +32,8 @@ const CONFIG_ENV: Record<TokenSource, ReadonlyArray<{ name: string; folders: rea
   // oh-my-pi honours Pi's variables; PI_CONFIG_DIR (its home, `.omp` unless set) moves the default roots in
   // `defaultRoots` only — providerRoots reads the first two entries, the session directory and the agent directory, as for Pi.
   omp: [{ name: "PI_CODING_AGENT_SESSION_DIR", folders: [""], standard: null }, { name: "PI_CODING_AGENT_DIR", folders: ["sessions"], standard: home => join(home, ".omp", "agent") }],
+  // OpenCode moves with XDG_DATA_HOME (there is no dedicated variable in OpenCode itself).
+  opencode: [{ name: "XDG_DATA_HOME", folders: ["opencode"], standard: home => join(home, ".local", "share", "opencode") }],
 };
 /** Directories one variable may name when the text cannot tell which assignment wins (the latest ones are kept). */
 const MAX_CANDIDATES = 3;
@@ -76,6 +78,9 @@ export function defaultRoots(context: Pick<RootContext, "home" | "env"> = { home
     // duplicates above are dropped, and those sessions count once, as Pi.
     { source: "omp", path: env.PI_CODING_AGENT_SESSION_DIR || join(ompAgentDir(home, env), "sessions") },
     { source: "omp", path: join(home, ".omp", "agent", "sessions") },
+    // 2.18: OpenCode. Its data directory holds the database and the legacy storage tree beside each other.
+    { source: "opencode", path: join(env.XDG_DATA_HOME || join(home, ".local", "share"), "opencode") },
+    { source: "opencode", path: join(home, ".local", "share", "opencode") },
   ];
   return roots.filter((root, index) => roots.findIndex(other => resolve(other.path) === resolve(root.path)) === index);
 }
@@ -184,7 +189,7 @@ const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^grok(?:$|[-_.])/i
  */
 export function providerSource(id: string, entry: { extends?: unknown; command?: unknown }): TokenSource | null {
   const base = typeof entry.extends === "string" && entry.extends.trim() ? entry.extends.trim() : id;
-  if (base === "claude" || base === "codex" || base === "pi" || base === "omp") return base;
+  if (base === "claude" || base === "codex" || base === "pi" || base === "omp" || base === "opencode") return base;
   if (base !== "acp") return null;
   for (const word of commandPrograms(entry.command)) {
     const name = basename(word), source = ACP_COMMANDS.find(([pattern]) => pattern.test(name))?.[1];

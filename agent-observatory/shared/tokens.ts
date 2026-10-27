@@ -44,9 +44,9 @@ const iso = z.iso.datetime();
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const rate = z.number().nonnegative().finite();
 
-export const TOKEN_SOURCES = ["claude", "codex", "grok", "pi", "omp"] as const;
+export const TOKEN_SOURCES = ["claude", "codex", "grok", "pi", "omp", "opencode"] as const;
 export type TokenSource = typeof TOKEN_SOURCES[number];
-export const tokenSourceNames: Record<TokenSource, string> = { claude: "Claude Code", codex: "Codex", grok: "Grok CLI", pi: "Pi", omp: "oh-my-pi" };
+export const tokenSourceNames: Record<TokenSource, string> = { claude: "Claude Code", codex: "Codex", grok: "Grok CLI", pi: "Pi", omp: "oh-my-pi", opencode: "OpenCode" };
 /** Provider breakdown row of the sessions no Paseo agent matches (run in a terminal, or the agent was deleted). */
 export const TOKEN_UNMATCHED = "__unmatched__";
 /** Log roots watched at once: the standard ones plus custom providers' config directories (server/tokens/roots). */

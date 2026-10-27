@@ -24,10 +24,10 @@ test("default roots follow the daemon's environment, then the standard locations
     { source: "claude", path: "/home/user/.claude/projects" }, { source: "claude", path: "/home/user/.config/claude/projects" },
     { source: "codex", path: "/home/user/.codex/sessions" }, { source: "codex", path: "/home/user/.codex/archived_sessions" },
     { source: "grok", path: "/home/user/.grok/sessions" }, { source: "pi", path: "/home/user/.pi/agent/sessions" },
-    { source: "omp", path: "/home/user/.omp/agent/sessions" }]);
+    { source: "omp", path: "/home/user/.omp/agent/sessions" }, { source: "opencode", path: "/home/user/.local/share/opencode" }]);
   assert.deepEqual(defaultRoots({ home: HOME, env: { CLAUDE_CONFIG_DIR: "/srv/claude", CODEX_HOME: "/srv/codex", GROK_HOME: "/srv/grok", PI_CODING_AGENT_DIR: "/srv/pi" } }).map(root => root.path),
     ["/srv/claude/projects", "/home/user/.claude/projects", "/home/user/.config/claude/projects", "/srv/codex/sessions", "/srv/codex/archived_sessions",
-      "/srv/grok/sessions", "/home/user/.grok/sessions", "/srv/pi/sessions", "/home/user/.pi/agent/sessions", "/home/user/.omp/agent/sessions"],
+      "/srv/grok/sessions", "/home/user/.grok/sessions", "/srv/pi/sessions", "/home/user/.pi/agent/sessions", "/home/user/.omp/agent/sessions", "/home/user/.local/share/opencode"],
     "a PI_CODING_AGENT_DIR set for Pi is where oh-my-pi writes too: one root, counted as Pi");
   // Pi's session directory can be named itself; it wins over the agent directory.
   assert.deepEqual(defaultRoots({ home: HOME, env: { PI_CODING_AGENT_DIR: "/srv/pi", PI_CODING_AGENT_SESSION_DIR: "/srv/pi-sessions" } }).filter(root => root.source === "pi").map(root => root.path),
@@ -39,6 +39,9 @@ test("default roots follow the daemon's environment, then the standard locations
     ["/home/user/.omp/agent/sessions"], "the directory PI_CODING_AGENT_DIR names is Pi's root too, so it counts once, as Pi; PI_CONFIG_DIR is not followed when the agent directory is set");
   assert.deepEqual(defaultRoots({ home: HOME, env: { PI_CODING_AGENT_SESSION_DIR: "/srv/pi-sessions" } }).filter(root => root.source === "omp").map(root => root.path),
     ["/home/user/.omp/agent/sessions"], "a session directory shared with Pi counts once, as Pi");
+  // OpenCode: its data directory follows XDG_DATA_HOME, then the standard location.
+  assert.deepEqual(defaultRoots({ home: HOME, env: { XDG_DATA_HOME: "/srv/xdg" } }).filter(root => root.source === "opencode").map(root => root.path),
+    ["/srv/xdg/opencode", "/home/user/.local/share/opencode"]);
 });
 
 test("only literal absolute paths are accepted; ~ and $HOME expand at the start", () => {
@@ -55,7 +58,9 @@ test("a provider writes Claude Code, Codex, Pi or Grok CLI logs when it is one o
   assert.equal(providerSource("claude-team", { extends: "claude" }), "claude");
   assert.equal(providerSource("codex-proxy", { extends: "codex" }), "codex");
   assert.equal(providerSource("kimi", { extends: "acp" }), null);
-  assert.equal(providerSource("opencode", {}), null);
+  // 2.18: a provider id or extends of opencode is OpenCode itself.
+  assert.equal(providerSource("opencode", {}), "opencode");
+  assert.equal(providerSource("oc-team", { extends: "opencode" }), "opencode");
   // 2.14: Pi (built in or extended), and an ACP provider by the CLI its command runs.
   assert.equal(providerSource("pi", {}), "pi");
   assert.equal(providerSource("pi-work", { extends: "pi" }), "pi");

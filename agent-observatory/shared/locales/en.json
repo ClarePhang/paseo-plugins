@@ -2098,7 +2098,7 @@
     "message4": "; ",
     "tokenStatisticsAreTemporarilyUnavailable": "Token statistics are temporarily unavailable",
     "noTokenDataYet": "No token data yet",
-    "localClaudeCodeCodexGrokCli": "Local Claude Code, Codex, Grok CLI, Pi, and oh-my-pi session logs are summarized here",
+    "localClaudeCodeCodexGrokCli": "Local Claude Code, Codex, Grok CLI, Pi, oh-my-pi, and OpenCode session logs are summarized here",
     "retry": "Retry",
     "tokenStatisticsSyncFailedShowingThe": "Token statistics sync failed. Showing the previous result: {value1}",
     "modelUsage": "Model usage",

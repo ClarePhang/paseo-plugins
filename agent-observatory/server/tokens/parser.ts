@@ -8,7 +8,7 @@ const object = (value: unknown): ObjectValue => value && typeof value === "objec
 const text = (value: unknown, limit = 256): string => typeof value === "string" ? value.slice(0, limit) : "";
 const count = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 const stamp = (value: unknown): number | null => {
-  const at = typeof value === "string" ? Date.parse(value) : NaN;
+  const at = typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
   return Number.isFinite(at) && at >= 0 ? at : null;
 };
 export const callKey = (parts: unknown[]): string => createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
@@ -39,13 +39,20 @@ function piCreatedAt(path: string): number | null {
 export function initialParser(path: string, parentSession: string | null, source?: TokenSource): ParserState {
   const name = basename(path, ".jsonl");
   const grok = source === "grok" || (source === undefined && basename(path) === GROK_USAGE_FILE);
-  const sessionId = parentSession ?? (grok ? basename(dirname(path)) : source === "pi" || source === "omp" ? piSessionId(name)
-    : name.startsWith("rollout-") ? name.match(/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i)?.[1] ?? name : name);
+  // OpenCode: a legacy message file's session is its directory; the database file's id is never used.
+  const opencodeSession = source === "opencode" && basename(path) !== "opencode.db" ? basename(dirname(path)) : null;
+  let sessionId: string;
+  if (parentSession) sessionId = parentSession;
+  else if (grok) sessionId = basename(dirname(path));
+  else if (opencodeSession) sessionId = opencodeSession;
+  else if (source === "pi" || source === "omp") sessionId = piSessionId(name);
+  else if (name.startsWith("rollout-")) sessionId = name.match(/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i)?.[1] ?? name;
+  else sessionId = name;
   return { sessionId: sessionId.slice(0, 256), cwd: "", model: null, inputAt: null, lastTotal: null, open: null, openInputAt: null,
     sessions: [sessionId.slice(0, 256)], links: [], hasForks: false, metaSeen: false, pendingRecord: false, legacySessionId: sessionId.slice(0, 256), parentThread: null };
 }
 function remember(list: string[], id: string): void { if (id && !list.includes(id) && list.length < 256) list.push(id); }
-function emit(file: LogFile, candidate: Candidate, start: number | null, sink: CallSink): void {
+export function emit(file: LogFile, candidate: Candidate, start: number | null, sink: CallSink): void {
   const state = file.state, previous = state.open?.call.key === candidate.call.key ? state.open : null;
   const settled = previous ? null : state.open;
   if (previous) {
@@ -134,6 +141,42 @@ export function parseGrokUsage(content: string, file: LogFile, sink: CallSink): 
       emit(file, { call, forked: false }, null, sink);
     }
   }
+  return true;
+}
+
+/**
+ * OpenCode (2.18), one assistant message from either backend, counted the way OpenCode totals it: the `tokens` of the
+ * message's `data` (a database row's JSON, or a legacy storage file), the response time from `time.created` to
+ * `time.completed`; `reasoning` is its own counter there, not part of the output. A message still streaming has no
+ * completed time and is not a call yet; an all-zero one (aborted) never is. A message is keyed by its id — the same
+ * one a legacy file and its migrated database row carry, so both backends count it once. A session with a parent
+ * (`session.parent_id`) is a sub-agent's.
+ */
+export function parseOpendencodeMessage(message: ObjectValue, file: LogFile, sink: CallSink, subagent: boolean): void {
+  const time = object(message.time), at = stamp(time.completed), start = stamp(time.created);
+  if (at === null) return;
+  const tokens = object(message.tokens), cache = object(tokens.cache);
+  const input = count(tokens.input), cacheWrite = count(cache.write), cacheRead = count(cache.read), output = count(tokens.output);
+  if (!input && !cacheWrite && !cacheRead && !output) return;
+  const id = text(message.id, 256);
+  if (!id) return;
+  const state = file.state;
+  state.sessionId = text(message.sessionID, 256) || state.sessionId;
+  remember(state.sessions, state.sessionId);
+  const cwd = text(object(message.path).cwd, 4096);
+  if (cwd) state.cwd = cwd;
+  const call: LedgerCall = { key: callKey(["opencode", id]), source: "opencode", sessionId: state.sessionId, cwd: state.cwd,
+    model: text(message.modelID, 240) || null, at, start: validStart(start, at), input, cacheWrite, cacheRead, output,
+    reasoning: count(tokens.reasoning), subagent };
+  emit(file, { call, forked: false }, start, sink);
+}
+
+/** A legacy storage message file, one JSON document read whole: parsed, re-read by the reader when its size or mtime changes. */
+export function parseOpendencodeDoc(content: string, file: LogFile, sink: CallSink): boolean {
+  let row: ObjectValue;
+  try { row = object(JSON.parse(content)); } catch { return false; }
+  if (text(row.role, 32) !== "assistant") return true;
+  parseOpendencodeMessage(row, file, sink, false);
   return true;
 }
 

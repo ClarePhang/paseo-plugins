@@ -8,6 +8,13 @@
 - Custom providers built on `omp` (a provider id or `extends: "omp"`, or an ACP provider whose command runs the `omp` CLI) are recognised like the other bases, and the directories their environment names are watched the same way.
 - A saved ledger never changes shape: readers older than this release quarantine it once it holds omp entries and import their logs again, so the ledger version stays 2.
 
+**OpenCode in the Token page**
+- Token statistics now count OpenCode too, shown as "OpenCode" and coloured cyan. Since 1.2 OpenCode keeps every session in one database (`opencode.db` under its data directory); it is opened read-only and read incrementally by row, so a message still streaming is counted once it completes. Each assistant message's `tokens` (fresh input, cache read and write, reasoning as its own counter), model, working directory and response time count per message, keyed by the message id; OpenCode's own per-message cost estimate is not shown, the page counts tokens.
+- The pre-1.2 storage tree (`storage/message/<session>/<message>.json`) is read beside the database, and what a migration left behind counts once: both backends carry the same message ids, and the ledger deduplicates by them.
+- Sub-agents are recognised from the session's parent (`session.parent_id`), and a replaced database (a reinstall) is read from its first row again, still without counting anything twice.
+- Where the data lives: `$XDG_DATA_HOME/opencode`, by default `~/.local/share/opencode`. OpenCode has no dedicated data-directory variable (the `OPENCODE_DATA_DIR` some tools read is not OpenCode's), and a provider id or `extends: "opencode"` is recognised like the other bases.
+- A saved ledger never changes shape: readers older than this release quarantine it once it holds OpenCode entries and import their logs again, so the ledger version stays 2.
+
 ## 2.17.1 · 2026-10-25
 
 **Paseo 0.13 support (0.12 keeps working)**
