@@ -36,8 +36,8 @@ const CONFIG_ENV: Record<TokenSource, ReadonlyArray<{ name: string; folders: rea
   opencode: [{ name: "XDG_DATA_HOME", folders: ["opencode"], standard: home => join(home, ".local", "share", "opencode") }],
   codebuddy: [{ name: "CODEBUDDY_CONFIG_DIR", folders: ["projects"], standard: home => join(home, ".codebuddy") }],
   qoder: [{ name: "QODER_CONFIG_DIR", folders: ["projects"], standard: home => join(home, ".qoder") }],
-  gemini: [{ name: "GEMINI_CLI_HOME", folders: ["tmp"], standard: home => join(home, ".gemini", "tmp") }],
-  qwen: [{ name: "QWEN_RUNTIME_DIR", folders: ["projects"], standard: home => join(home, ".qwen", "projects") }],
+  gemini: [{ name: "GEMINI_CLI_HOME", folders: ["tmp"], standard: home => join(home, ".gemini") }],
+  qwen: [{ name: "QWEN_RUNTIME_DIR", folders: ["projects"], standard: home => join(home, ".qwen") }],
 };
 /** Directories one variable may name when the text cannot tell which assignment wins (the latest ones are kept). */
 const MAX_CANDIDATES = 3;

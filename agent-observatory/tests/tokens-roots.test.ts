@@ -47,6 +47,9 @@ test("default roots follow the daemon's environment, then the standard locations
   // OpenCode: its data directory follows XDG_DATA_HOME, then the standard location.
   assert.deepEqual(defaultRoots({ home: HOME, env: { XDG_DATA_HOME: "/srv/xdg" } }).filter(root => root.source === "opencode").map(root => root.path),
     ["/srv/xdg/opencode", "/home/user/.local/share/opencode"]);
+  // Gemini CLI and Qwen Code move with their variables, then fall back to their own directory (the log folders stay).
+  assert.deepEqual(defaultRoots({ home: HOME, env: { GEMINI_CLI_HOME: "/srv/gem", QWEN_RUNTIME_DIR: "/srv/qw" } }).filter(root => root.source === "gemini" || root.source === "qwen").map(root => root.path),
+    ["/srv/gem/tmp", "/home/user/.gemini/tmp", "/srv/qw/projects", "/home/user/.qwen/projects"]);
 });
 
 test("only literal absolute paths are accepted; ~ and $HOME expand at the start", () => {
@@ -296,6 +299,8 @@ test("Grok and Pi providers that move their logs add roots: GROK_HOME, Pi's sess
     "omp-sessions": { extends: "omp", env: { PI_CODING_AGENT_SESSION_DIR: "/srv/omp-sessions" } },
     "omp-team": { extends: "omp", env: { PI_CODING_AGENT_DIR: "/srv/omp-agent" } },
     "omp-acp": { extends: "acp", command: ["omp", "agent", "stdio"] },
+    "gem-unset": { extends: "gemini", env: { GEMINI_CLI_HOME: "" } },
+    "qw-team": { extends: "qwen", env: { QWEN_RUNTIME_DIR: "/srv/qw-rt" } },
     kimi: { extends: "acp", command: ["kimi", "acp"], env: { GROK_HOME: "/never" } },
   }, { home: HOME, env: {}, readText: async path => { reads.push(path); return texts[path] ?? null; } });
   assert.deepEqual(roots, [
@@ -306,6 +311,8 @@ test("Grok and Pi providers that move their logs add roots: GROK_HOME, Pi's sess
     { source: "pi", path: "/home/user/pi-sessions", provider: "pi-work", via: "settings" },
     { source: "omp", path: "/srv/omp-sessions", provider: "omp-sessions", via: "env" },
     { source: "omp", path: "/srv/omp-agent/sessions", provider: "omp-team", via: "env" },
+    { source: "gemini", path: "/home/user/.gemini/tmp", provider: "gem-unset", via: "env" },
+    { source: "qwen", path: "/srv/qw-rt/projects", provider: "qw-team", via: "env" },
   ]);
   assert.ok(!reads.some(path => path.includes("kimi")), "a provider whose logs are not read is not looked into");
   assert.ok(reads.every(path => !/auth|credential/i.test(path)), "no credentials are ever opened");

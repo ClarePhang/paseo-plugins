@@ -34,7 +34,7 @@ export const tokenInfo = () => [
   t("secondaryTokenBoard.onlyCountsModelsWorkingDirectoriesAnd"),
   ...quotaInfo,
 ];
-/** Each log source's colour in the source rows: the vendor family it mostly runs (Claude orange, Codex teal, Grok violet), Pi pink, oh-my-pi sky, OpenCode cyan, CodeBuddy blue, Qoder green. */
+/** Each log source's colour in the source rows: the vendor family it mostly runs (Claude orange, Codex teal, Grok violet), Pi pink, oh-my-pi sky, OpenCode cyan, CodeBuddy blue, Qoder green, Gemini CLI fuchsia, Qwen Code lime. */
 const sourceHues: Record<TokenSource, Hue> = { claude: "orange", codex: "teal", grok: "violet", pi: "pink", omp: "sky", opencode: "cyan", codebuddy: "blue", qoder: "green", gemini: "fuchsia", qwen: "lime" };
 const isTokenSource = (key: string): key is TokenSource => (TOKEN_SOURCES as readonly string[]).includes(key);
 

@@ -264,8 +264,10 @@ function parseCodebuddyLine(line: string, file: LogFile, sink: CallSink): void {
  * Gemini CLI (2.18), the JSONL chat records of the windowed generation: the first row names the session, `$set` rows
  * carry the window's messages, and a `gemini` message counts the tokens its response used — the cached part comes out
  * of the prompt, thoughts are their own counter, and there is no response time. A message is keyed by its id, so a
- * window that re-emits it corrects instead of counting again. The older single-JSON records carry no per-message
- * tokens and are never logs here.
+ * window that re-emits it while it is still the latest call corrects instead of counting again; once later messages
+ * have passed it, a re-emission is dropped as the duplicate it is. The older single-JSON records carry no per-message
+ * tokens and are never logs here. (A single row over the reader's 16 MiB line cap is skipped whole: an extreme window
+ * with a large attachment inlined.)
  */
 function parseGeminiLine(lineText: string, file: LogFile, sink: CallSink): void {
   if (!/"(?:\$set|sessionId)"/.test(lineText)) return;
@@ -313,11 +315,13 @@ function parseQwenLine(lineText: string, file: LogFile, sink: CallSink): void {
   if (row.type !== "assistant" || at === null) return;
   const usage = object(row.usageMetadata);
   if (!Object.keys(usage).length) return;
+  const uuid = text(row.uuid, 256);
+  if (!uuid) return;
   const prompt = count(usage.promptTokenCount), cacheRead = Math.min(prompt, count(usage.cachedContentTokenCount));
   const output = count(usage.candidatesTokenCount);
   const input = Math.max(0, prompt - cacheRead);
   if (!input && !cacheRead && !output) return;
-  const call: LedgerCall = { key: callKey(["qwen", text(row.uuid, 256) || String(at)]), source: "qwen", sessionId: session,
+  const call: LedgerCall = { key: callKey(["qwen", uuid]), source: "qwen", sessionId: session,
     cwd: state.cwd, model: text(row.model, 240) || state.model, at, start: validStart(state.inputAt, at), input,
     cacheWrite: 0, cacheRead, output, reasoning: Math.min(output, count(usage.thoughtsTokenCount)), subagent: false };
   emit(file, { call, forked: false }, state.inputAt, sink);
