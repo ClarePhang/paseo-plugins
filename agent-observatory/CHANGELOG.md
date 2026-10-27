@@ -22,6 +22,12 @@
 - Watching eight sources needs more roots than the sixteen a ledger could name: the cap is now twenty, and readers older than this release quarantine a ledger past their cap and import its logs again.
 - Both log only what they show above; Qoder's own accounting is Credits and OpenCode's an estimate, and the page counts tokens, never money.
 
+**Gemini CLI and Qwen Code in the Token page**
+- Token statistics now count Gemini CLI ("Gemini CLI", fuchsia) and Qwen Code ("Qwen Code", lime).
+- Gemini CLI: the JSONL chat records of the windowed generation (`$GEMINI_CLI_HOME/tmp/<project>/chats/session-*.jsonl`, by default `~/.gemini/tmp/…`). Each `gemini` message counts the tokens its response used — the cached part comes out of the prompt, `thoughts` are their own counter — and the message id deduplicates the windows that re-emit it. A message has no response time, so these calls stay out of the live speed and the fastest list. The older single-JSON records carry no per-message tokens and are not counted; a project directory named by a SHA-256 hash cannot be traced back to a directory, so those sessions show no project.
+- Qwen Code: one call per assistant row of its Claude-shaped transcripts (`$QWEN_RUNTIME_DIR/projects`, by default `~/.qwen/projects`), the cached part out of `promptTokenCount`, thoughts their own counter, the model on the row, the user row before it as the request start.
+- A saved ledger never changes shape: readers older than this release quarantine it once it holds these entries and import their logs again, so the ledger version stays 2. The root cap is now twenty-four.
+
 ## 2.17.1 · 2026-10-25
 
 **Paseo 0.13 support (0.12 keeps working)**

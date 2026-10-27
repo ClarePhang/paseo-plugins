@@ -17,6 +17,7 @@ const models = [
   ["claude-haiku-4-5", "claude", 0.10, 138, 980], ["claude-sonnet-5", "claude", 0.07, 82, 900], ["gpt-5", "codex", 0.04, 61, 760],
   ["grok-4-fast", "grok", 0.05, 96, 640], ["kimi-k2", "pi", 0.03, 71, 700], ["glm-5.3-flash", "omp", 0.02, 64, 620],
   ["gemini-3-flash-preview", "opencode", 0.02, 88, 540], ["deepseek-v4.1-flash", "codebuddy", 0.02, 82, 480], ["qmodel-max", "qoder", 0.01, 74, 520],
+  ["gemini-3-pro", "gemini", 0.01, 70, 600], ["coder-model", "qwen", 0.01, 66, 380],
 ];
 const projects = [["acme/web-app", 0.34], ["demo-project", 0.19], ["data-pipeline", 0.15], ["Commerce Platform", 0.12], ["Mobile Experience", 0.1], ["docs-site", 0.06], ["scratch", 0.04]];
 
@@ -58,8 +59,8 @@ export function fixtureTokens(range = "30d", offset = 480, now = Date.now()) {
   const modelRows = models.map((model, index) => row(model[0], model[0], vendorOf(model[0], null),
     daily.reduce((total, entry) => addTokenCounts(total, entry.byModel[index]), emptyTokenCounts()), round(18 * model[2] * length / 3 + 1), new Date(now - index * 11 * 60_000).toISOString()))
     .filter(entry => entry.calls > 0).sort((a, b) => totalOf(b) - totalOf(a));
-  const sourceSessions = { claude: 14, codex: 5, grok: 2, pi: 0.5, omp: 0.5, opencode: 1, codebuddy: 1, qoder: 0.5 };
-  const sourceRows = ["claude", "codex", "grok", "pi", "omp", "opencode", "codebuddy", "qoder"].map(source => row(source, tokenSourceNames[source], null,
+  const sourceSessions = { claude: 14, codex: 5, grok: 2, pi: 0.5, omp: 0.5, opencode: 1, codebuddy: 1, qoder: 0.5, gemini: 0.5, qwen: 0.5 };
+  const sourceRows = ["claude", "codex", "grok", "pi", "omp", "opencode", "codebuddy", "qoder", "gemini", "qwen"].map(source => row(source, tokenSourceNames[source], null,
     models.reduce((total, model) => model[1] === source ? addTokenCounts(total, modelRows.find(entry => entry.key === model[0]) ?? emptyTokenCounts()) : total, emptyTokenCounts()),
     round(length * sourceSessions[source] + 1), new Date(now - 60_000).toISOString())).filter(entry => entry.calls > 0).sort((a, b) => totalOf(b) - totalOf(a));
   const scale = (counts, share) => Object.fromEntries(Object.entries(emptyTokenCounts()).map(([key]) => [key, round(counts[key] * share)]));
@@ -95,6 +96,7 @@ export function fixtureTokens(range = "30d", offset = 480, now = Date.now()) {
         { source: "omp", path: "~/.omp/agent/sessions", files: 9, error: null },
         { source: "opencode", path: "~/.local/share/opencode", files: 6, error: null },
         { source: "codebuddy", path: "~/.codebuddy/projects", files: 12, error: null }, { source: "qoder", path: "~/.qoder/projects", files: 4, error: null },
+        { source: "gemini", path: "~/.gemini/tmp", files: 3, error: null }, { source: "qwen", path: "~/.qwen/projects", files: 5, error: null },
         { source: "claude", path: "~/.config/claude/projects", files: 0, error: null }],
     },
   };

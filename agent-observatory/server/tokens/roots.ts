@@ -36,6 +36,8 @@ const CONFIG_ENV: Record<TokenSource, ReadonlyArray<{ name: string; folders: rea
   opencode: [{ name: "XDG_DATA_HOME", folders: ["opencode"], standard: home => join(home, ".local", "share", "opencode") }],
   codebuddy: [{ name: "CODEBUDDY_CONFIG_DIR", folders: ["projects"], standard: home => join(home, ".codebuddy") }],
   qoder: [{ name: "QODER_CONFIG_DIR", folders: ["projects"], standard: home => join(home, ".qoder") }],
+  gemini: [{ name: "GEMINI_CLI_HOME", folders: ["tmp"], standard: home => join(home, ".gemini", "tmp") }],
+  qwen: [{ name: "QWEN_RUNTIME_DIR", folders: ["projects"], standard: home => join(home, ".qwen", "projects") }],
 };
 /** Directories one variable may name when the text cannot tell which assignment wins (the latest ones are kept). */
 const MAX_CANDIDATES = 3;
@@ -90,6 +92,11 @@ export function defaultRoots(context: Pick<RootContext, "home" | "env"> = { home
     { source: "qoder", path: join(home, ".qoder", "projects") },
     // The Chinese edition keeps its own home when no variable moves it.
     { source: "qoder", path: join(home, ".qoder-cn", "projects") },
+    // 2.18: Gemini CLI's chat records and Qwen Code's transcripts.
+    { source: "gemini", path: join(env.GEMINI_CLI_HOME || join(home, ".gemini"), "tmp") },
+    { source: "gemini", path: join(home, ".gemini", "tmp") },
+    { source: "qwen", path: join(env.QWEN_RUNTIME_DIR || join(home, ".qwen"), "projects") },
+    { source: "qwen", path: join(home, ".qwen", "projects") },
   ];
   return roots.filter((root, index) => roots.findIndex(other => resolve(other.path) === resolve(root.path)) === index);
 }
@@ -198,7 +205,7 @@ const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^grok(?:$|[-_.])/i
  */
 export function providerSource(id: string, entry: { extends?: unknown; command?: unknown }): TokenSource | null {
   const base = typeof entry.extends === "string" && entry.extends.trim() ? entry.extends.trim() : id;
-  if (base === "claude" || base === "codex" || base === "pi" || base === "omp" || base === "opencode" || base === "codebuddy" || base === "qoder") return base;
+  if (base === "claude" || base === "codex" || base === "pi" || base === "omp" || base === "opencode" || base === "codebuddy" || base === "qoder" || base === "gemini" || base === "qwen") return base;
   if (base !== "acp") return null;
   for (const word of commandPrograms(entry.command)) {
     const name = basename(word), source = ACP_COMMANDS.find(([pattern]) => pattern.test(name))?.[1];

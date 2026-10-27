@@ -260,11 +260,76 @@ function parseCodebuddyLine(line: string, file: LogFile, sink: CallSink): void {
   emit(file, { call, forked: false }, null, sink);
 }
 
+/**
+ * Gemini CLI (2.18), the JSONL chat records of the windowed generation: the first row names the session, `$set` rows
+ * carry the window's messages, and a `gemini` message counts the tokens its response used — the cached part comes out
+ * of the prompt, thoughts are their own counter, and there is no response time. A message is keyed by its id, so a
+ * window that re-emits it corrects instead of counting again. The older single-JSON records carry no per-message
+ * tokens and are never logs here.
+ */
+function parseGeminiLine(lineText: string, file: LogFile, sink: CallSink): void {
+  if (!/"(?:\$set|sessionId)"/.test(lineText)) return;
+  let row: ObjectValue;
+  try { row = object(JSON.parse(lineText)); } catch { return; }
+  const state = file.state;
+  const session = text(row.sessionId, 256);
+  if (session) { state.sessionId = session; remember(state.sessions, session); }
+  const window = object(row.$set).messages;
+  if (!Array.isArray(window)) return;
+  for (const entry of window.slice(-2_000)) {
+    const message = object(entry);
+    if (text(message.type, 32) !== "gemini") continue;
+    const tokens = object(message.tokens);
+    const at = stamp(message.timestamp);
+    const id = text(message.id, 256);
+    if (at === null || !id) continue;
+    const prompt = count(tokens.input), cacheRead = Math.min(prompt, count(tokens.cached));
+    const output = count(tokens.output);
+    const input = Math.max(0, prompt - cacheRead);
+    if (!input && !cacheRead && !output) continue;
+    const model = text(message.model, 240) || state.model;
+    state.model = model;
+    const call: LedgerCall = { key: callKey(["gemini", id]), source: "gemini", sessionId: state.sessionId, cwd: state.cwd,
+      model, at, start: null, input, cacheWrite: 0, cacheRead, output, reasoning: Math.min(output, count(tokens.thoughts)), subagent: false };
+    emit(file, { call, forked: false }, null, sink);
+  }
+}
+
+/**
+ * Qwen Code (2.18), Claude Code's transcript shape: assistant rows carry `usageMetadata` (the prompt includes the
+ * cached part; thoughts are their own counter) and the model, the user row before them is the request start, and an
+ * all-zero row (an aborted call) is not a call. Keyed by the row's uuid.
+ */
+function parseQwenLine(lineText: string, file: LogFile, sink: CallSink): void {
+  if (!/"type"\s*:\s*"(?:assistant|user)"/.test(lineText)) return;
+  let row: ObjectValue;
+  try { row = object(JSON.parse(lineText)); } catch { return; }
+  const state = file.state;
+  const session = text(row.sessionId, 256) || state.sessionId;
+  state.sessionId = session; remember(state.sessions, session);
+  if (typeof row.cwd === "string") state.cwd = text(row.cwd, 4096);
+  const at = stamp(row.timestamp);
+  if (row.type === "user") { if (at !== null) state.inputAt = at; return; }
+  if (row.type !== "assistant" || at === null) return;
+  const usage = object(row.usageMetadata);
+  if (!Object.keys(usage).length) return;
+  const prompt = count(usage.promptTokenCount), cacheRead = Math.min(prompt, count(usage.cachedContentTokenCount));
+  const output = count(usage.candidatesTokenCount);
+  const input = Math.max(0, prompt - cacheRead);
+  if (!input && !cacheRead && !output) return;
+  const call: LedgerCall = { key: callKey(["qwen", text(row.uuid, 256) || String(at)]), source: "qwen", sessionId: session,
+    cwd: state.cwd, model: text(row.model, 240) || state.model, at, start: validStart(state.inputAt, at), input,
+    cacheWrite: 0, cacheRead, output, reasoning: Math.min(output, count(usage.thoughtsTokenCount)), subagent: false };
+  emit(file, { call, forked: false }, state.inputAt, sink);
+}
+
 /** A cheap discriminator precedes JSON.parse; parsed objects never escape this function. */
 export function parseLine(line: string, file: LogFile, sink: CallSink): void {
   if (file.source === "pi" || file.source === "omp") { parsePiLine(line, file, sink); return; }
   if (file.source === "qoder") { parseQoderLine(line, file, sink); return; }
   if (file.source === "codebuddy") { parseCodebuddyLine(line, file, sink); return; }
+  if (file.source === "gemini") { parseGeminiLine(line, file, sink); return; }
+  if (file.source === "qwen") { parseQwenLine(line, file, sink); return; }
   if (file.source === "grok") return; // a JSON document, not lines: parseGrokUsage
   if (file.source === "claude") {
     if (!/"type"\s*:\s*"(?:assistant|user)"/.test(line)) return;

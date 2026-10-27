@@ -80,7 +80,7 @@ const sortRecords = (items: CallRecord[], kind: "fastest" | "biggest"): CallReco
  */
 function callRecord(call: LedgerCall, kind: "fastest" | "biggest"): CallRecord | null {
   const ms = call.start === null ? 0 : call.at - call.start;
-  if (kind === "fastest" ? ms < 1000 || call.output < 100 : modelCalls(call) > 1 || call.source === "grok" || call.source === "codebuddy") return null;
+  if (kind === "fastest" ? ms < 1000 || call.output < 100 : modelCalls(call) > 1 || call.source === "grok" || call.source === "codebuddy" || call.source === "gemini") return null;
   return { key: call.key, at: call.at, model: call.model, output: call.output, tps: ms ? call.output / ms * 1000 : 0 };
 }
 function record(data: TokenData, call: LedgerCall, sign: number): void {
