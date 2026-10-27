@@ -1,6 +1,6 @@
 # agent-observatory 支持更多主流 Harness：调研与评估
 
-日期：2026-10-26 · 范围：Token 统计（Token 页 / 实时流速 / 明细·Harness 维度 / 看板）可接入的本机 CLI harness 会话日志
+日期：2026-10-26（第一波）· 2026-10-27 补充第二、三波（见 §8）· 范围：Token 统计（Token 页 / 实时流速 / 明细·Harness 维度 / 看板）可接入的本机 CLI harness 会话日志
 方法：本机实证（WSL2，`~/.claude` `~/.codex` `~/.grok` `~/.pi` `~/.omp` `~/.opencode` `~/.codebuddy` `~/.qoder` `~/.gemini` `~/.qwen` `~/.cursor` `~/.kimi` `~/.iflow` `~/.factory` `~/.copilot` `~/.config/goose` `~/.trae`）+ 7 路并行一手来源调研（官方文档/源码/发布说明优先，社区逆向工具佐证）。每条事实标注来源级别：**本地实证**（本机文件/二进制 strings 提取）＞ **官方**（文档/源码）＞ **社区**（第三方逆向，多源一致才采信）。
 
 ---
@@ -190,3 +190,79 @@
 1. **账本版本不随加源 bump**（§2.1 写了「加源必须 bump」）：实现保持 `version: 2`——新源的 `z.enum` 本身就会让旧读者解析失败并走隔离重导，bump 反而强迫所有存量用户全量重导一次；见 `persistence.ts` 注释。
 2. **`PI_CONFIG_DIR` 只进 `defaultRoots`，不进 Provider 发现**（§3.1 建议加进 `CONFIG_ENV`）：`providerRoots` 只消费 `CONFIG_ENV` 的前两槽（session 目录、agent 目录），第三槽是死配置；Provider 级换目录用 `PI_CODING_AGENT_DIR`，README 已写明。
 3. 本机实证后补的事实：本机 OpenCode 为 1.19.4、`opencode.db` 为主数据源（§3.2 写作「本机仍为 legacy 布局」，批次 2 实施时已按双后端实现）。
+
+---
+
+## 8. 第二、三波调研（2026-10-27）
+
+第一波的 10 源已全部实施（omp / OpenCode / CodeBuddy / Qoder / Gemini CLI / Qwen Code 于 2.18.0）。本节覆盖两波补充调研：**第二波**面向主流/OSS 编辑器与 agent 扩展及云端类；**第三波**以本机 `~/.paseo/config.json` 的 20 个 Provider 为准，逐个对照覆盖情况并对尚未覆盖者做本机数据考古。全部遵守当次「暂不落盘」约束，只读取证。
+
+### 8.1 第二波：主流 / OSS harness
+
+| 优先级 | Harness | 本机落盘 | 用量字段 | 工作量 | 结论 |
+|---|---|---|---|---|---|
+| **T1** | **Cline** | 多 host 的 `globalStorage/saoudrizwan.claude-dev/tasks/<taskId>/`（`ui_messages.json` + `api_conversation_history.json`）+ 新 CLI `~/.cline/data/sessions/` | **per-request 全套**：`tokensIn/tokensOut/cacheWrites/cacheReads/cost`（`api_req_started` 行内嵌 JSON），模型/时间戳/cwd/子代理齐；唯无 reasoning | **S** | 明文 JSON（整文件原子重写，非 append）、官方文档确认 schema、tokscale/deja-vu 等多解析器互证；需遍历多 host root（Code/Insiders/VSCodium/Cursor/Windsurf/vscode-server）。来源：[官方 Prompt Storage](https://docs.cline.bot/enterprise-solutions/monitoring/prompt-storage)、[tokscale](https://github.com/junhoyeo/tokscale)、[deja-vu cline.md](https://github.com/vshulcz/deja-vu/blob/main/docs/registry/cline.md) |
+| **T1** | **Zed** | `${XDG_DATA_HOME:-~/.local/share}/zed/threads/threads.db`（SQLite 单库） | per-request：input/output/**cache read+write**（`request_token_usage` 挂在用户消息 id 上）+ 顶层 `cumulative_token_usage`；无 reasoning、无 per-message 时间戳 | **S** | 行内 `data` BLOB = **zstd 压缩 JSON**（v0.2/v0.3 两代混存），需 sqlite+zstd（Node 24 `zlib.zstdDecompressSync` 原生支持）；codeburn/OpenUsage 已有解析可抄。来源：[codeburn zed.md](https://github.com/getagentseal/codeburn/blob/main/docs/providers/zed.md)、[OpenUsage](https://openusage.sh/docs/providers/zed)、[deja-vu zed](https://vshulcz.github.io/deja-vu/registry/zed.html) |
+| **T2** | **Roo Code**（Cline 同构 fork） | `globalStorage/rooveterinaryinc.roo-cline/tasks/`（另有 `roo-cline.customStoragePath` 重定向） | 同 Cline + `contextTokens` | ≈0（搭 Cline 车） | ⚠️ **扩展已于 2026-05-15 停运**——只做存量数据。来源：[Roo-Code](https://github.com/RooCodeInc/Roo-Code)、[settings-management](https://docs.roocode.com/features/settings-management) |
+| **T2** | **Kilo Code**（旧代） | `globalStorage/kilocode.kilo-code/tasks/` | 同 Roo | ≈0（搭车） | 新代已迁 SQLite（`~/.local/share/kilo/kilo.db`），两代并存，新代需另评。来源：[kilo sessions](https://kilo.ai/docs/collaborate/sessions-sharing) |
+| **T2** | **Google Antigravity** | 三目录并存：`~/.gemini/antigravity{,-cli,-ide}/`；新版每会话 SQLite `<uuid>.db`（`trajectory_meta/steps/gen_metadata/trajectory_metadata_blob`），旧代为无 schema 的 `<uuid>.pb` | **per-call 五元组齐全**：`ModelUsageStats`（input/output/cache read/cache write/reasoning，字段号已被社区逆向定稿）；模型是 enum 占位需映射表（M16/M37=Gemini 3.1 Pro High、M35=Claude Sonnet 4.6 等，随版本维护） | **M** | 社区逆向成熟（[txcript](https://github.com/skillsynchq/txcript/blob/main/docs/formats/antigravity.md)、[codeburn](https://github.com/getagentseal/codeburn/blob/main/docs/providers/antigravity.md)、多个解密导出器）；schema 漂移风险高（`.pb`→`.db` 迁移、路径新增）；**旧 `.pb` 不做**。本机数据全是旧代 `.pb`——实现后对旧会话无收益，需等 `.db` 代际 |
+| **T2** | **OpenHands**（原 OpenDevin） | `$OPENHANDS_PERSISTENCE_DIR`（默认 `~/.openhands`）`conversations/<hex>/`：`base_state.json` + `events/event-NNNNN.json` 每事件一文件；子代理在 `subagents/` | prompt/completion/cache/cost 齐（LiteLLM metrics）；**注意**：`prompt_tokens` 是跨 turn 累计口径、`delegate:*` 键与 `subagents/` 求和会双重计数需去重 | **S–M** | 纯 JSON 免依赖、schema 开源（pydantic）；`base_state.json` 全量重写，明细按事件文件取。来源：[官方 metrics](https://docs.openhands.dev/sdk/guides/metrics)、[ClawMetry](https://clawmetry.com/docs/runtime/openhands) |
+| **T3** | **TRAE Agent**（字节开源 CLI） | 项目工作目录 `trajectories/trajectory_*.json` | 原生 per-call `usage.input_tokens` 等全字段（官方 schema） | **S** | 明文 JSON 可读性极好；但写在项目目录需按 cwd 搜索、用户面窄 |
+| **T3** | **Comate CLI**（百度） | `~/.comate/logs/agent.log`；会话落盘未证实 | 未证实 | **S–M** | PyPI 开源（`comate-cli`）可下载审计定论；社区生态为零 |
+| **可选** | CodeBuddy 官方 stats API | `/api/v1/stats`、`/api/v1/stats/session` | 历史/会话聚合 | — | 可作现有解析的交叉校验。来源：[官方 HTTP API](https://www.codebuddy.ai/docs/cli/http-api) |
+
+### 8.2 第二波否决（并入一期名单）
+
+| Harness | 否决原因 |
+|---|---|
+| **Windsurf / Cascade** | 落盘 `.pb`（含 AES-256-GCM 加密版本）与 leveldb **不含 per-call token**——真实 usage 只在服务端响应流（`ModelUsageStats` 不持久化），本地仅滞后配额百分比缓存（`cachedPlanInfo`）；会话正文可解（protobuf 逆向成熟）但 token 统计无从谈起。来源：[协议逆向](https://github.com/topmetax-ctrl/windsurf-api-private/blob/master/docs/reference/CASCADE_PROTOCOL.md)、[无 token 计数佐证](https://github.com/tokentopapp/agent-windsurf/blob/main/AGENTS.md)、[quota 计价 O](https://docs.windsurf.com/windsurf/accounts/quota) |
+| **Continue** | 已被 Cursor 收购；per-call usage 不完整（[issue #2227](https://github.com/continuedev/continue/issues/2227) 仍开着） |
+| **Jules / Devin / GitHub Copilot Coding Agent / Cursor web** | 云端执行，本地仅 PR/patch，无会话日志 |
+| **通义灵码 IDE 插件（`~/.lingma`）** | leveldb + sqlite-vec（`vec0` 扩展，本机实证标准 sqlite 打不开）+ 无 schema 文档；逆向成本 L 且低收益 |
+| **CodeGeeX** | 本地 agent 为 pyarmor 加密，无落盘用量；智谱个人用户主力走 GLM 套餐（见下） |
+
+**天然覆盖（零工作量）**：①**GLM Coding Plan**（智谱）官方走 Anthropic 兼容端点跑 Claude Code，会话落 `~/.claude/` → 已被 claude 源覆盖；②**通义灵码 CLI** 已于 2026-05-20 更名 **Qoder CN**，`qodercli` 会话格式与已支持的 qoder 源同构 → 天然覆盖；③CodeBuddy 国内版同上。
+
+### 8.3 第三波：以 `~/.paseo/config.json` 的 20 个 Provider 为准
+
+本机 daemon 配置的 Provider 全景与覆盖判定（密钥已脱敏，只读取证）：
+
+| Provider | command / 底座 | enabled | 判定 |
+|---|---|---|---|
+| `omp` | omp | **是（主力）** | ✅ 已覆盖（55,560 calls 已入账） |
+| `codebuddy-code` | `codebuddy --acp` | 否 | ✅ 标准根在扫（626 calls，与逐字段验证值一致） |
+| `qoder` / `claude` / `codex` / `pi` / `grok` / `opencode` / `copilot` / `kiro` / `cursor` | 各官方 CLI | 否 | ✅ 前者已覆盖；kiro/cursor 一期已否决 |
+| `omp-logs` | `extends: pi` + `PI_CODING_AGENT_SESSION_DIR=~/.omp/agent/sessions`（自建观测辅助） | 否 | ✅ 冗余但无害（omp 标准根覆盖同目录） |
+| `hermes` | `hermes acp`（Nous Research） | 否 | 🆕 **可做 S–M**（见下） |
+| `mimo` | `mimo acp`（小米 MiMoCode） | 否 | 🆕 **可做 S**（见下） |
+| `dsh-acp` | `dsh --profile acp`（DeepSeek Harness） | 否 | 🆕 **可做 S**（见下） |
+| `cline` / `kilo` / `antigravity` | cline / kilo / antigravity CLI | 否 | 见 §8.1（cline ✅；kilo ⚠️；antigravity ⚠️ 本机为旧 `.pb` 代） |
+| `muse` / `zcode-acp` | 二进制未安装 | 否 | ❌ N/A（配置为将来保留，无本地数据） |
+
+#### 8.3.1 hermes（Nous Research）— `~/.hermes/state.db`（SQLite 3.9MB；`~/.hermes` 共 5.8G）
+
+- `sessions` 表（89 行）：`input/output/cache_read/cache_write/reasoning_tokens` 五元组 + `api_call_count` + `estimated/actual_cost_usd` + `cwd/git_branch/git_repo_root/title/parent_session_id`（子代理）+ 起止时间
+- `session_model_usage` 表（9 行）：per-session per-model 同五元组 + `billing_provider/base_url`（本机样例：deepseek-v4-flash、glm-5.3-flash 走内部网关）
+- 粒度为**会话级模型聚合**（非 per-call）；`response_store.db` 是 LLM 响应缓存，非统计源；`sessions/request_dump_*.json` 仅错误转储（无 usage）
+- 结论：**✅ 可做（S–M）**——五元组 + reasoning + cost + 元数据全有，SQLite 直读；本机 89 会话真实数据
+
+#### 8.3.2 MiMoCode（小米）— `~/.local/share/mimocode/mimocode.db`（SQLite 237MB）
+
+- Schema 与 OpenCode **1:1 同构**（drizzle：`session{project_id,parent_id,slug,directory,time_created,time_archived,…}`、`message{id,session_id,data}`、`project/part/workspace/todo`）；`message.data` 就是 OpenCode assistant JSON（`tokens{input,output,reasoning,cache{read,write}}`、`modelID`、`time{created,completed}`、`path.cwd`），本机 841 会话 / 7136 消息逐字段核实
+- 结论：**✅ 可做（S）**——解析器直接复用 OpenCode 逻辑（读单库而非分片文件）；本机现有样本为零用量/`<synthetic>` 行，真实用量待新会话验证
+
+#### 8.3.3 dsh（DeepSeek Harness）— `~/.dsh/storages/cost-meter/ledger.json`（331KB 明文）
+
+- 按天聚合：`days[date] → {input, output, cacheRead, cacheWrite, reasoning, calls, cost, byProviderModel{route:model → 同五元组}, sessions[{id → 同五元组}]}`——**日级 + 会话级 + 模型级**三层五元组（无 per-call 时间戳）；路由如 `deepseek-official`、`opencode:deepseek-v4-flash-free`
+- 另有 `~/.dsh/sessions/`（117 项，按项目 slug 分目录）可深挖 per-call；本机仅 5 天数据（8 月中旬）
+- 结论：**✅ 可做（S）**——账本即数据，按天/会话导入；注意它是 dsh 自算账本（cost 多币种），只取 token 五元组
+
+### 8.4 若排后续批次的优先级建议
+
+1. **Cline 两代 + Roo/Kilo 旧代搭车**（T1，S）——用户量最大的未覆盖 harness
+2. **hermes + MiMoCode**（S–M / S）——本机存量数据最直接受益的两个
+3. **dsh**（S）——账本即数据
+4. **Zed / Antigravity / Kilo 新代**（暂缓）——格式就绪但本机暂无数据或数据在旧代
+5. 观察项：Comate CLI 审计、CodeBuddy stats API 交叉校验、通义灵码/Qoder CN 的 CN 版路径（`~/.qoder-cn` 已支持）
+
+> 本节全部结论遵守当次「暂不落盘」约束产生：本地只读取证 + web 调研，未在取证阶段写任何文件；本节为事后整理补记。
