@@ -11,9 +11,9 @@ import { ensurePrivateDirectory } from "../paseo-home";
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const time = z.number().finite().nonnegative(), count = z.number().int().nonnegative();
-// 2.14 adds the grok and pi sources; 2.18 adds omp and opencode. A ledger holding a source an older version's enum lacks is
-// quarantined by it and its logs are imported again; the version stays 2, so upgrading adds nothing for readers that
-// never saw the new source.
+// 2.14 adds the grok and pi sources; 2.18 adds omp, opencode, codebuddy and qoder. A ledger holding a source an older
+// version's enum lacks is quarantined by it and its logs are imported again; the version stays 2, so upgrading adds
+// nothing for readers that never saw the new source.
 const source = z.enum(TOKEN_SOURCES), id = z.string().min(1).max(256), cwd = z.string().max(4096);
 const model = z.string().max(240).nullable(), hash = z.string().regex(/^[a-f0-9]{16}$/);
 const callSchema = z.object({ key: hash, source, sessionId: id, cwd, at: time, start: time.nullable(), model,

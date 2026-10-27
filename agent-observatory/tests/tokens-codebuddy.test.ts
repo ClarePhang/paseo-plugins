@@ -3,12 +3,16 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { addCall, emptyData } from "../server/tokens/data";
 import { TokenIngester } from "../server/tokens/ingester";
-import { tokenSourceNames } from "../shared/tokens";
+import { buildTokenSnapshot } from "../server/tokens/snapshot";
+import { StatsDirectory } from "../server/stats-directory";
+import { tokenSnapshotSchema, tokenSourceNames, type TokenSnapshot } from "../shared/tokens";
 import { type LedgerCall, type LogRoot } from "../server/tokens/types";
 // Fictional logs in the shapes CodeBuddy Code writes (field names checked against real logs; values invented).
 const NOW = Date.parse("2026-10-11T12:00:00Z");
 const line = (row: unknown) => JSON.stringify(row) + "\n";
+const coverage: TokenSnapshot["coverage"] = { earliestAt: null, latestAt: null, backfill: { done: true, files: 0, filesDone: 0, bytes: 0, bytesDone: 0 }, roots: [] };
 const SESSION = "01a10000-0000-7000-8000-00000000000a", SUB = "01a20000-0000-7000-8000-00000000000b";
 const metaRow = (sessionId: string) => ({ type: "session-meta", id: sessionId + "-meta", sessionId, timestamp: NOW - 3_600_000, meta: { "codebuddy.ai/hostKind": "unopted" } });
 /** The usage summary a `function_call` row carries, cache-inclusive input like the OpenAI-compatible gateways report it. */
@@ -69,6 +73,10 @@ test("CodeBuddy: a function_call row is one call, cache split out of its inclusi
   ], "the cache comes out of the inclusive input; a shared step usage counts once; raw usage is the fallback; a message row's providerData counts too");
   assert.equal(tokenSourceNames.codebuddy, "CodeBuddy");
   assert.ok(!JSON.stringify([...ingester.files.values()]).includes("PRIVATE_"));
+  // A whole-step record counts in the totals, but has no response time: nothing in the live speed or the fastest records.
+  const data = emptyData(); for (const call of rows) addCall(data, call, null, NOW);
+  const snapshot = tokenSnapshotSchema.parse(buildTokenSnapshot(data, { range: "7d", utcOffsetMinutes: 0 }, NOW, new StatsDirectory(), coverage));
+  assert.equal(snapshot.totals.calls, 4); assert.equal(snapshot.totals.genMs, 0); assert.equal(snapshot.speed.p50, null);
 }));
 
 test("CodeBuddy: a sub-agent transcript under its session counts for that session", () => ingest(root => [{ source: "codebuddy", path: root }], async (root, ingester, calls) => {
@@ -79,9 +87,9 @@ test("CodeBuddy: a sub-agent transcript under its session counts for that sessio
   await mkdir(join(sub, ".."), { recursive: true });
   await writeFile(sub, [metaRow(SUB), functionCall("sfc1", SUB, { cwd: "/home/me/app", usage: usageRow(2_000, 500, 200, 20), messageId: "subresp" })].map(line).join(""));
   await ingester.backfillAll();
-  const subCall = [...calls.values()].find(call => call.sessionId === SUB);
+  const subCall = [...calls.values()].find(call => call.subagent);
   assert.ok(subCall, "the sub-agent's call is counted");
-  assert.equal(subCall.subagent, true, "a transcript under the session's directory is a sub-agent's");
+  assert.equal(subCall.sessionId, SESSION, "the sub-agent's usage belongs to the session it served");
   assert.equal(subCall.cwd, "/home/me/app");
 }));
 

@@ -230,7 +230,8 @@ function parseCodebuddyLine(line: string, file: LogFile, sink: CallSink): void {
   const at = stamp(row.timestamp);
   const provider = object(row.providerData), usage = object(provider.usage), raw = object(provider.rawUsage);
   if (at === null || (!Object.keys(usage).length && !Object.keys(raw).length)) return;
-  const session = text(row.sessionId, 256) || state.sessionId;
+  // A transcript under the session's directory is a sub-agent's: its usage belongs to the session it served.
+  const session = file.parentSession ?? (text(row.sessionId, 256) || state.sessionId);
   state.sessionId = session; remember(state.sessions, session);
   if (typeof row.cwd === "string") state.cwd = text(row.cwd, 4096);
   const inputDetails = Array.isArray(usage.inputTokensDetails) ? object(usage.inputTokensDetails[0]) : {};

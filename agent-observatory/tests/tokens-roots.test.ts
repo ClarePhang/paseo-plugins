@@ -25,11 +25,12 @@ test("default roots follow the daemon's environment, then the standard locations
     { source: "codex", path: "/home/user/.codex/sessions" }, { source: "codex", path: "/home/user/.codex/archived_sessions" },
     { source: "grok", path: "/home/user/.grok/sessions" }, { source: "pi", path: "/home/user/.pi/agent/sessions" },
     { source: "omp", path: "/home/user/.omp/agent/sessions" }, { source: "opencode", path: "/home/user/.local/share/opencode" },
-    { source: "codebuddy", path: "/home/user/.codebuddy/projects" }, { source: "qoder", path: "/home/user/.qoder/projects" }]);
+    { source: "codebuddy", path: "/home/user/.codebuddy/projects" }, { source: "qoder", path: "/home/user/.qoder/projects" },
+    { source: "qoder", path: "/home/user/.qoder-cn/projects" }]);
   assert.deepEqual(defaultRoots({ home: HOME, env: { CLAUDE_CONFIG_DIR: "/srv/claude", CODEX_HOME: "/srv/codex", GROK_HOME: "/srv/grok", PI_CODING_AGENT_DIR: "/srv/pi" } }).map(root => root.path),
     ["/srv/claude/projects", "/home/user/.claude/projects", "/home/user/.config/claude/projects", "/srv/codex/sessions", "/srv/codex/archived_sessions",
       "/srv/grok/sessions", "/home/user/.grok/sessions", "/srv/pi/sessions", "/home/user/.pi/agent/sessions", "/home/user/.omp/agent/sessions",
-      "/home/user/.local/share/opencode", "/home/user/.codebuddy/projects", "/home/user/.qoder/projects"],
+      "/home/user/.local/share/opencode", "/home/user/.codebuddy/projects", "/home/user/.qoder/projects", "/home/user/.qoder-cn/projects"],
     "a PI_CODING_AGENT_DIR set for Pi is where oh-my-pi writes too: one root, counted as Pi");
   // Pi's session directory can be named itself; it wins over the agent directory.
   assert.deepEqual(defaultRoots({ home: HOME, env: { PI_CODING_AGENT_DIR: "/srv/pi", PI_CODING_AGENT_SESSION_DIR: "/srv/pi-sessions" } }).filter(root => root.source === "pi").map(root => root.path),

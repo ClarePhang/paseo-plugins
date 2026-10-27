@@ -88,6 +88,8 @@ export function defaultRoots(context: Pick<RootContext, "home" | "env"> = { home
     { source: "codebuddy", path: join(home, ".codebuddy", "projects") },
     { source: "qoder", path: join(env.QODER_CONFIG_DIR || join(home, ".qoder"), "projects") },
     { source: "qoder", path: join(home, ".qoder", "projects") },
+    // The Chinese edition keeps its own home when no variable moves it.
+    { source: "qoder", path: join(home, ".qoder-cn", "projects") },
   ];
   return roots.filter((root, index) => roots.findIndex(other => resolve(other.path) === resolve(root.path)) === index);
 }
