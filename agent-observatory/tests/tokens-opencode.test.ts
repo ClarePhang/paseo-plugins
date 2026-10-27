@@ -31,9 +31,9 @@ const insertMessage = (db: DatabaseSync, id: string, session: string, data: unkn
   db.prepare("INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)").run(id, session, NOW, NOW, JSON.stringify(data));
 const full = { input: 3_587, output: 256, reasoning: 733, cache: { read: 50_096, write: 120 } };
 
-async function ingest(roots: (root: string) => LogRoot[], run: (root: string, ingester: TokenIngester, calls: Map<string, LedgerCall>) => Promise<void>): Promise<void> {
+async function ingest(roots: (root: string) => LogRoot[], run: (root: string, ingester: TokenIngester, calls: Map<string, LedgerCall>) => Promise<void>, onChange?: () => void): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "tokens-opencode-")), calls = new Map<string, LedgerCall>();
-  const ingester = new TokenIngester({ roots: roots(root), now: () => NOW, onCall: call => { calls.set(call.key, call); } });
+  const ingester = new TokenIngester({ roots: roots(root), now: () => NOW, onCall: call => { calls.set(call.key, call); }, onChange });
   try { await run(root, ingester, calls); } finally { await ingester.close(); await rm(root, { recursive: true, force: true }); }
 }
 
@@ -112,4 +112,41 @@ test("OpenCode: a root without a database and without storage is quiet", () => i
   await ingester.poll(true);
   assert.equal(calls.size, 0);
   assert.deepEqual(ingester.roots.map(item => [item.files, item.error]), [[0, null]]);
+}));
+
+test("OpenCode: a poll over an unchanged database changes nothing, and a message without a session row still counts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tokens-opencode-idle-")), calls = new Map<string, LedgerCall>();
+  let changes = 0;
+  const ingester = new TokenIngester({ roots: [{ source: "opencode", path: root }], now: () => NOW, onCall: call => { calls.set(call.key, call); }, onChange: () => { changes++; } });
+  try {
+    const db = new DatabaseSync(join(root, "opencode.db"));
+    createTables(db);
+    insertMessage(db, "msg_1", "ses_own", messageData({ id: "msg_1", session: "ses_own", tokens: full }));
+    // An orphan: its session row is gone (a migration can leave one behind), a top-level call of its own.
+    insertMessage(db, "msg_o", "ses_gone", messageData({ id: "msg_o", session: "ses_gone", tokens: full, created: NOW - 5_000, completed: NOW - 4_000 }));
+    db.close();
+    await ingester.backfillAll();
+    assert.equal(calls.size, 2);
+    assert.equal([...calls.values()].some(call => call.sessionId === "ses_gone" && !call.subagent), true, "an orphan message counts as its own top-level session");
+    const before = changes;
+    await ingester.poll(true);
+    await ingester.poll(true);
+    assert.equal(changes, before, "a poll that reads nothing new does not touch the ledger");
+    const tracked = [...ingester.files.values()].find(file => file.path.endsWith("opencode.db"));
+    assert.ok(tracked && tracked.mtime > 0, "the database's own times keep the file in the hot poll");
+  } finally { await ingester.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("OpenCode: more rows than one batch reads are all counted", () => ingest(root => [{ source: "opencode", path: root }], async (root, ingester, calls) => {
+  const db = new DatabaseSync(join(root, "opencode.db"));
+  createTables(db);
+  db.prepare("INSERT INTO session (id, parent_id, directory) VALUES (?, ?, ?)").run("ses_own", null, "/home/me/app");
+  for (let index = 0; index < 1_200; index++) {
+    const assistant = index % 240 === 0;
+    insertMessage(db, `msg_${index}`, "ses_own", messageData({ id: `msg_${index}`, role: assistant ? undefined : "user",
+      tokens: assistant ? full : undefined, completed: assistant ? NOW - 8_000 + index : null }));
+  }
+  db.close();
+  await ingester.backfillAll();
+  assert.equal(calls.size, 5, "five assistant rows across three batches, each counted once");
 }));

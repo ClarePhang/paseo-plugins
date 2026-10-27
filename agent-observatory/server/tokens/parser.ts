@@ -171,7 +171,8 @@ export function parseOpendencodeMessage(message: ObjectValue, file: LogFile, sin
   emit(file, { call, forked: false }, start, sink);
 }
 
-/** A legacy storage message file, one JSON document read whole: parsed, re-read by the reader when its size or mtime changes. */
+/** A legacy storage message file, one JSON document read whole: parsed, re-read by the reader when its size or mtime changes.
+ *  The legacy tree carries no parent relation, so its messages count as top-level sessions of their own. */
 export function parseOpendencodeDoc(content: string, file: LogFile, sink: CallSink): boolean {
   let row: ObjectValue;
   try { row = object(JSON.parse(content)); } catch { return false; }
