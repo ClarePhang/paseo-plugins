@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { setImmediate as yieldLoop } from "node:timers/promises";
-import { initialParser, parseClineDoc, parseGrokUsage, parseLine, parseOpendencodeDoc } from "./parser";
+import { initialParser, parseClineDoc, parseDshLedger, parseGrokUsage, parseLine, parseOpendencodeDoc } from "./parser";
 import { isOpendencodeDb } from "./opencode-db";
 import type { CallSink, LogFile, ParserState } from "./types";
 
@@ -57,6 +57,7 @@ export async function tailFile(file: LogFile, sink: CallSink, onBytes?: (bytes: 
     return await (file.source === "grok" ? readWhole(file, handle, sink, parseGrokUsage, true, MAX_WHOLE_FILE, onBytes)
       : file.source === "opencode" && !isOpendencodeDb(file) ? readWhole(file, handle, sink, parseOpendencodeDoc, false, MAX_WHOLE_FILE, onBytes)
       : file.source === "cline" || file.source === "roo" || file.source === "kilo" ? readWhole(file, handle, sink, parseClineDoc, false, MAX_TASK_FILE, onBytes)
+      : file.source === "dsh" ? readWhole(file, handle, sink, parseDshLedger, false, MAX_TASK_FILE, onBytes)
       : tailOpen(file, handle, sink, onBytes, onReset));
   } finally { await handle.close(); }
 }

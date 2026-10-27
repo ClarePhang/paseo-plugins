@@ -2098,7 +2098,7 @@
     "message4": "; ",
     "tokenStatisticsAreTemporarilyUnavailable": "Token statistics are temporarily unavailable",
     "noTokenDataYet": "No token data yet",
-    "localClaudeCodeCodexGrokCli": "Local Claude Code, Codex, Grok CLI, Pi, oh-my-pi, OpenCode, CodeBuddy, Qoder, Gemini CLI, Qwen Code, Cline, Roo Code, and Kilo Code session logs are summarized here",
+    "localClaudeCodeCodexGrokCli": "Local Claude Code, Codex, Grok CLI, Pi, oh-my-pi, OpenCode, CodeBuddy, Qoder, Gemini CLI, Qwen Code, Cline, Roo Code, Kilo Code, Hermes, MiMoCode, and DeepSeek Harness session logs are summarized here",
     "retry": "Retry",
     "tokenStatisticsSyncFailedShowingThe": "Token statistics sync failed. Showing the previous result: {value1}",
     "modelUsage": "Model usage",

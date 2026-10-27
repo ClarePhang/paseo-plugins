@@ -7,6 +7,8 @@ import type { CallSink, LogFile } from "./types";
 
 /** OpenCode ≥ 1.2 keeps every session, message and part in one database next to the legacy `storage/` tree. */
 export const OPENCODE_DB_FILE = "opencode.db";
+/** MiMoCode reuses OpenCode's database layout under its own XDG data directory. */
+export const MIMO_DB_FILE = "mimocode.db";
 /**
  * Rows newer than the watermark minus this many are read again on every poll: a message's row appears when the message
  * starts and gains its tokens and completed time only when it ends, so the window is what catches a message completed
@@ -18,6 +20,7 @@ export const OPENCODE_DB_WINDOW = 512;
 const OPENCODE_DB_BATCH = 512;
 
 export const isOpendencodeDb = (file: LogFile): boolean => file.source === "opencode" && basename(file.path) === OPENCODE_DB_FILE;
+export const isMimoDb = (file: LogFile): boolean => file.source === "mimo" && basename(file.path) === MIMO_DB_FILE;
 
 /**
  * Reads the assistant messages a database holds past the watermark, earliest first, and moves the watermark along.

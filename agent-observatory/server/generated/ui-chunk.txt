@@ -4179,10 +4179,10 @@ var duration2 = import_zod13.z.number().nonnegative().finite();
 var iso3 = import_zod13.z.iso.datetime();
 var day2 = import_zod13.z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 var rate = import_zod13.z.number().nonnegative().finite();
-var TOKEN_SOURCES = ["claude", "codex", "grok", "pi", "omp", "opencode", "codebuddy", "qoder", "gemini", "qwen"];
-var tokenSourceNames = { claude: "Claude Code", codex: "Codex", grok: "Grok CLI", pi: "Pi", omp: "oh-my-pi", opencode: "OpenCode", codebuddy: "CodeBuddy", qoder: "Qoder", gemini: "Gemini CLI", qwen: "Qwen Code" };
+var TOKEN_SOURCES = ["claude", "codex", "grok", "pi", "omp", "opencode", "codebuddy", "qoder", "gemini", "qwen", "cline", "roo", "kilo", "hermes", "mimo", "dsh"];
+var tokenSourceNames = { claude: "Claude Code", codex: "Codex", grok: "Grok CLI", pi: "Pi", omp: "oh-my-pi", opencode: "OpenCode", codebuddy: "CodeBuddy", qoder: "Qoder", gemini: "Gemini CLI", qwen: "Qwen Code", cline: "Cline", roo: "Roo Code", kilo: "Kilo Code", hermes: "Hermes", mimo: "MiMoCode", dsh: "DeepSeek Harness" };
 var TOKEN_UNMATCHED = "__unmatched__";
-var MAX_TOKEN_ROOTS = 24;
+var MAX_TOKEN_ROOTS = 48;
 var isArchivedLogRoot = (path) => /[\\/]archived_sessions[\\/]?$/.test(path);
 var tokenCountsSchema = import_zod13.z.object({
   /** Model responses (API calls). */
@@ -15728,7 +15728,7 @@ var tokenInfo = () => [
   t2("secondaryTokenBoard.onlyCountsModelsWorkingDirectoriesAnd"),
   ...quotaInfo
 ];
-var sourceHues = { claude: "orange", codex: "teal", grok: "violet", pi: "pink", omp: "sky", opencode: "cyan", codebuddy: "blue", qoder: "green", gemini: "fuchsia", qwen: "lime" };
+var sourceHues = { claude: "orange", codex: "teal", grok: "violet", pi: "pink", omp: "sky", opencode: "cyan", codebuddy: "blue", qoder: "green", gemini: "fuchsia", qwen: "lime", cline: "amber", roo: "red", kilo: "gray", hermes: "indigo", mimo: "teal", dsh: "violet" };
 var isTokenSource = (key) => TOKEN_SOURCES.includes(key);
 function Hero3({ theme, snapshot, live: live2, narrow }) {
   const today = snapshot.daily.at(-1), todayTotal = live2?.today.total ?? (today ? tokenTotal(today) : 0), todayOutput = live2?.today.output ?? today?.output ?? 0;

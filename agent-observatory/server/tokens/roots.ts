@@ -43,6 +43,10 @@ const CONFIG_ENV: Record<TokenSource, ReadonlyArray<{ name: string; folders: rea
   cline: [],
   roo: [],
   kilo: [],
+  // Hermes / MiMoCode / dsh keep their databases at fixed paths with no moving variable.
+  hermes: [],
+  mimo: [],
+  dsh: [],
 };
 /** Directories one variable may name when the text cannot tell which assignment wins (the latest ones are kept). */
 const MAX_CANDIDATES = 3;
@@ -127,6 +131,10 @@ export function defaultRoots(context: Pick<RootContext, "home" | "env"> = { home
     { source: "qwen", path: join(home, ".qwen", "projects") },
     // 2.18: Cline / Roo Code / Kilo Code task transcripts in every VS Code family host's globalStorage.
     ...clineFamilyRoots(home),
+    // 2.18: Hermes's state database, MiMoCode's OpenCode-shaped database, dsh's cost ledger.
+    { source: "hermes", path: join(home, ".hermes") },
+    { source: "mimo", path: join(home, ".local", "share", "mimocode") },
+    { source: "dsh", path: join(home, ".dsh", "storages", "cost-meter") },
   ];
   return roots.filter((root, index) => roots.findIndex(other => resolve(other.path) === resolve(root.path)) === index);
 }
@@ -235,7 +243,7 @@ const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^grok(?:$|[-_.])/i
  */
 export function providerSource(id: string, entry: { extends?: unknown; command?: unknown }): TokenSource | null {
   const base = typeof entry.extends === "string" && entry.extends.trim() ? entry.extends.trim() : id;
-  if (base === "claude" || base === "codex" || base === "pi" || base === "omp" || base === "opencode" || base === "codebuddy" || base === "qoder" || base === "gemini" || base === "qwen" || base === "cline" || base === "roo" || base === "kilo") return base;
+  if (base === "claude" || base === "codex" || base === "pi" || base === "omp" || base === "opencode" || base === "codebuddy" || base === "qoder" || base === "gemini" || base === "qwen" || base === "cline" || base === "roo" || base === "kilo" || base === "hermes" || base === "mimo" || base === "dsh") return base;
   if (base !== "acp") return null;
   for (const word of commandPrograms(entry.command)) {
     const name = basename(word), source = ACP_COMMANDS.find(([pattern]) => pattern.test(name))?.[1];

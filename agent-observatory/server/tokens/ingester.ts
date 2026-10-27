@@ -3,7 +3,8 @@ import { lstat, readdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { setImmediate as yieldLoop } from "node:timers/promises";
 import { GROK_USAGE_FILE, initialParser, subagentParent } from "./parser";
-import { isOpendencodeDb, OPENCODE_DB_FILE, readOpendencodeDb } from "./opencode-db";
+import { HERMES_DB_FILE, isHermesDb, readHermesStateDb } from "./hermes-db";
+import { isMimoDb, isOpendencodeDb, MIMO_DB_FILE, OPENCODE_DB_FILE, readOpendencodeDb } from "./opencode-db";
 import { readFirstLine, tailFile } from "./reader";
 import { defaultRoots, isInsightDirectory, MAX_ROOTS } from "./roots";
 import { DAY, safeError, type Backfill, type CallSink, type Candidate, type LedgerCall, type LogFile, type LogRoot, type ParserState } from "./types";
@@ -38,7 +39,8 @@ const isTaskMessages = (source: LogRoot["source"], name: string): boolean =>
  * per task, walked normally.
  */
 const isLog = (source: LogRoot["source"], name: string): boolean =>
-  name.endsWith(".jsonl") && (source !== "codex" || name.startsWith("rollout-")) || isTaskMessages(source, name);
+  name.endsWith(".jsonl") && (source !== "codex" || name.startsWith("rollout-")) || isTaskMessages(source, name)
+  || (source === "dsh" && name === "ledger.json");
 /** A sub-agent's log (`<session>/subagents/<agent>.jsonl`): its parent session's, never the place a prompt is logged. */
 const subagentLog = (source: LogRoot["source"], path: string): boolean => (source === "claude" || source === "codebuddy") && basename(dirname(path)) === "subagents";
 /** A Grok session group's working directory, from its URL-encoded name; null when the name is not one (a long cwd's slug). */
@@ -237,7 +239,21 @@ export class TokenIngester {
           await pause();
         }
       };
-      await (root.source === "grok" ? scanGrok() : root.source === "opencode" ? scanOpenCode() : walk(root.path, 0));
+      // MiMoCode: just its OpenCode-shaped database (no legacy tree).
+      const scanMimo = async (): Promise<void> => {
+        const database = join(root.path, MIMO_DB_FILE);
+        let details: Stats | null = null;
+        try { details = await lstat(database); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") root.error = safeError(error); }
+        if (details?.isFile()) { if (!visit()) return; await note(database, details); }
+      };
+      // Hermes: just its state database (the rest of its home is tools and caches).
+      const scanHermes = async (): Promise<void> => {
+        const database = join(root.path, HERMES_DB_FILE);
+        let details: Stats | null = null;
+        try { details = await lstat(database); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") root.error = safeError(error); }
+        if (details?.isFile()) { if (!visit()) return; await note(database, details); }
+      };
+      await (root.source === "grok" ? scanGrok() : root.source === "opencode" ? scanOpenCode() : root.source === "mimo" ? scanMimo() : root.source === "hermes" ? scanHermes() : walk(root.path, 0));
       // A late root listed for the first time: the logs it holds now are its history (marked fresh below), later ones are new.
       if (listed) { this.lateRoots.delete(rootIndex); this.listedRoots.add(rootIndex); }
       else if (this.listedRoots.has(rootIndex)) this.rootLosses.set(root.source, this.now());
@@ -291,9 +307,14 @@ export class TokenIngester {
       if (progress) this.backfill.bytesDone = Math.min(this.backfill.bytes, this.backfill.bytesDone + bytes);
     };
     try {
-      // OpenCode's database is not read as bytes: its rows past the watermark are queried read-only (opencode-db).
-      if (isOpendencodeDb(file)) {
+      // OpenCode's and MiMoCode's databases are not read as bytes: their rows are queried read-only (opencode-db).
+      if (isOpendencodeDb(file) || isMimoDb(file)) {
         if (await readOpendencodeDb(file, sink, onBytes)) this.changed();
+        return;
+      }
+      // Hermes's state database is queried read-only per closed session (hermes-db).
+      if (isHermesDb(file)) {
+        if (await readHermesStateDb(file, sink, onBytes)) this.changed();
         return;
       }
       // Read again from the start (replaced, cut short, rewritten): what was read of it before is gone, noted before the index takes

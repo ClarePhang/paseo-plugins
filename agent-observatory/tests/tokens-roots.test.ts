@@ -48,7 +48,9 @@ test("default roots follow the daemon's environment, then the standard locations
     { source: "kilo", path: "/home/user/.config/Cursor/User/globalStorage/kilocode.kilo-code/tasks" },
     { source: "kilo", path: "/home/user/.config/Windsurf/User/globalStorage/kilocode.kilo-code/tasks" },
     { source: "kilo", path: "/home/user/.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks" },
-    { source: "kilo", path: "/home/user/.vscode-server-insiders/data/User/globalStorage/kilocode.kilo-code/tasks" }]);
+    { source: "kilo", path: "/home/user/.vscode-server-insiders/data/User/globalStorage/kilocode.kilo-code/tasks" },
+    { source: "hermes", path: "/home/user/.hermes" }, { source: "mimo", path: "/home/user/.local/share/mimocode" },
+    { source: "dsh", path: "/home/user/.dsh/storages/cost-meter" }]);
   assert.deepEqual(defaultRoots({ home: HOME, env: { CLAUDE_CONFIG_DIR: "/srv/claude", CODEX_HOME: "/srv/codex", GROK_HOME: "/srv/grok", PI_CODING_AGENT_DIR: "/srv/pi" } }).map(root => root.path),
     ["/srv/claude/projects", "/home/user/.claude/projects", "/home/user/.config/claude/projects", "/srv/codex/sessions", "/srv/codex/archived_sessions",
       "/srv/grok/sessions", "/home/user/.grok/sessions", "/srv/pi/sessions", "/home/user/.pi/agent/sessions", "/home/user/.omp/agent/sessions",
@@ -74,7 +76,8 @@ test("default roots follow the daemon's environment, then the standard locations
       "/home/user/.config/Cursor/User/globalStorage/kilocode.kilo-code/tasks",
       "/home/user/.config/Windsurf/User/globalStorage/kilocode.kilo-code/tasks",
       "/home/user/.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks",
-      "/home/user/.vscode-server-insiders/data/User/globalStorage/kilocode.kilo-code/tasks"],
+      "/home/user/.vscode-server-insiders/data/User/globalStorage/kilocode.kilo-code/tasks",
+      "/home/user/.hermes", "/home/user/.local/share/mimocode", "/home/user/.dsh/storages/cost-meter"],
     "a PI_CODING_AGENT_DIR set for Pi is where oh-my-pi writes too: one root, counted as Pi");
   // Pi's session directory can be named itself; it wins over the agent directory.
   assert.deepEqual(defaultRoots({ home: HOME, env: { PI_CODING_AGENT_DIR: "/srv/pi", PI_CODING_AGENT_SESSION_DIR: "/srv/pi-sessions" } }).filter(root => root.source === "pi").map(root => root.path),

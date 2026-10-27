@@ -168,7 +168,7 @@ export function parseOpendencodeMessage(message: ObjectValue, file: LogFile, sin
   remember(state.sessions, state.sessionId);
   const cwd = text(object(message.path).cwd, 4096);
   if (cwd) state.cwd = cwd;
-  const call: LedgerCall = { key: callKey(["opencode", id]), source: "opencode", sessionId: state.sessionId, cwd: state.cwd,
+  const call: LedgerCall = { key: callKey([file.source, id]), source: file.source, sessionId: state.sessionId, cwd: state.cwd,
     model: text(message.modelID, 240) || null, at, start: validStart(start, at), input, cacheWrite, cacheRead, output,
     reasoning: count(tokens.reasoning), subagent };
   emit(file, { call, forked: false }, start, sink);
@@ -359,6 +359,44 @@ export function parseClineDoc(content: string, file: LogFile, sink: CallSink): b
       sessionId: state.sessionId, cwd: state.cwd, model: null, at, start: null, input, cacheWrite, cacheRead, output,
       reasoning: 0, subagent };
     emit(file, { call, forked: false }, null, sink);
+  }
+  return true;
+}
+
+/**
+ * dsh (2.18), one call per session per provider-model of every closed day in its cost ledger (`ledger.json`, a whole
+ * JSON document rewritten in place): the running day (the latest date) is still moving and waits; closed days are
+ * final, so the seen index keeps the re-reads from counting them twice. The route key is the model
+ * (`route:model`, e.g. `dsh:deepseek-v4`). No per-call timestamps and no working directory — at is the session's own
+ * time and the project column stays empty.
+ */
+export function parseDshLedger(content: string, file: LogFile, sink: CallSink): boolean {
+  let document: ObjectValue;
+  try { document = object(JSON.parse(content)); } catch { return false; }
+  const days = object(document.days);
+  const state = file.state;
+  const dates = Object.keys(days).sort();
+  const openDay = dates.at(-1);
+  for (const date of dates) {
+    if (date === openDay) continue; // the running day is still moving
+    const baseAt = stamp(date);
+    if (baseAt === null) continue;
+    const daySessions = object(days[date]).sessions;
+    for (const entry of Array.isArray(daySessions) ? daySessions : []) {
+      const session = object(entry);
+      const sessionId = text(session.id, 256);
+      if (!sessionId) continue;
+      const at = stamp(session.at) ?? baseAt + 43_200_000;
+      for (const [route, modelUsage] of Object.entries(object(session.byProviderModel))) {
+        const usage = object(modelUsage);
+        const input = count(usage.input), cacheRead = count(usage.cacheRead), cacheWrite = count(usage.cacheWrite), output = count(usage.output);
+        if (!input && !cacheRead && !cacheWrite && !output) continue;
+        const call: LedgerCall = { key: callKey(["dsh", sessionId, route, date]), source: "dsh", sessionId,
+          cwd: state.cwd, model: route.slice(0, 240) || null, at, start: null, input, cacheWrite, cacheRead, output,
+          reasoning: Math.min(output, count(usage.reasoning)), subagent: false, calls: Math.max(1, count(usage.calls)) };
+        emit(file, { call, forked: false }, null, sink);
+      }
+    }
   }
   return true;
 }
