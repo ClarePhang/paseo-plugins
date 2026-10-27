@@ -7,6 +7,7 @@ import { TOKEN_SOURCES, type TokenSource } from "../../shared/tokens";
 import type { TokenCall, TokenCallSource } from "../token-source";
 import type { TokenIngester } from "./ingester";
 import { initialParser, validStart } from "./parser";
+import { isOpendencodeDb, readOpendencodeDb } from "./opencode-db";
 import { tailFile } from "./reader";
 import { safeError, type Candidate, type LogFile, type ParserState } from "./types";
 
@@ -273,7 +274,7 @@ export class LocalTokenCallSource implements TokenCallSource {
     }
   }
 
-  private async read(file: LogFile): Promise<CachedFile | null> {
+  private async read(file: LogFile, sessions?: ReadonlySet<string>): Promise<CachedFile | null> {
     let entry = this.cache.get(file.path);
     try {
       const details = await stat(file.path);
@@ -289,6 +290,18 @@ export class LocalTokenCallSource implements TokenCallSource {
         // tailFile stats again; a replacement between the two stats must also clear the old call cache.
         if (parsedState !== current.file.state) { current.calls.clear(); parsedState = current.file.state; }
       };
+      // OpenCode's database is queried read-only, not read as text — the same branch the ingester's read takes.
+      // One database file holds many sessions, so the digest gets back just the ones it asked for.
+      if (isOpendencodeDb(current.file)) {
+        await readOpendencodeDb(current.file, (candidate, previous) => {
+          reconcileReset();
+          const before = current.calls.get(candidate.call.key);
+          current.calls.set(candidate.call.key, before ? merge(before, candidate, previous?.call.key === candidate.call.key) : copy(candidate));
+        }, bytes => { this.diagnostics.bytesRead += bytes; });
+        this.touch(current);
+        const calls = sessions ? new Map([...current.calls].filter(([, candidate]) => sessions.has(candidate.call.sessionId))) : current.calls;
+        return { file: current.file, calls };
+      }
       await tailFile(current.file, (candidate, previous) => {
         reconcileReset();
         const before = current.calls.get(candidate.call.key);
@@ -325,7 +338,7 @@ export class LocalTokenCallSource implements TokenCallSource {
       if (!selected.length) break;
       for (const file of selected) {
         read.add(file.path);
-        const entry = await this.read(file);
+        const entry = await this.read(file, new Set(sessionIds));
         if (!entry) continue;
         found = true; discovered.set(file.path, entry.file.state);
         identity.push([file.path, entry.file.dev, entry.file.ino, entry.file.size, entry.file.mtime, entry.file.offset, entry.calls.size]);

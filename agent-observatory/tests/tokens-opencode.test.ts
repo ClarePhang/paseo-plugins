@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { addCall, emptyData } from "../server/tokens/data";
 import { TokenIngester } from "../server/tokens/ingester";
 import { buildTokenSnapshot } from "../server/tokens/snapshot";
+import { LocalTokenCallSource } from "../server/tokens/source";
 import { StatsDirectory } from "../server/stats-directory";
 import { tokenSnapshotSchema, tokenSourceNames } from "../shared/tokens";
 import { iso, type LedgerCall, type LogRoot } from "../server/tokens/types";
@@ -55,6 +56,10 @@ test("OpenCode: completed assistant messages of opencode.db, with their cache sp
     ["opencode", "ses_own", "/home/me/app", "oc-test-model", 3_587, 50_096, 120, 256, 733, NOW - 8_000, NOW - 9_000, false],
     ["opencode", "ses_sub", "/home/me/app", "oc-test-model", 3_587, 50_096, 120, 256, 733, NOW - 6_000, NOW - 7_000, true],
   ], "a message of a session with a parent is a sub-agent's");
+  // The digest (复盘) reads the same database through the call source.
+  const history = await new LocalTokenCallSource(ingester).callsForSessions(["ses_own"]);
+  assert.equal(history?.source, "opencode");
+  assert.deepEqual(history?.calls.map(call => call.output), [256], "a database session's calls reach 复盘, not an all-zero block");
   assert.equal(tokenSourceNames.opencode, "OpenCode");
   const data = emptyData(); for (const call of rows) addCall(data, call, null, NOW);
   const snapshot = tokenSnapshotSchema.parse(buildTokenSnapshot(data, { range: "7d", utcOffsetMinutes: 0 }, NOW, new StatsDirectory(), coverage));

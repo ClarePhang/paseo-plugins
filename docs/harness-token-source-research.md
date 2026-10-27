@@ -184,3 +184,9 @@
 - `~/.cursor/chats/<md5>/<uuid>/store.db`：blobs+meta 两表 ✔；`~/.copilot/session-store.db`：sessions/turns/assistant_usage_events 表存在、本地空 ✔；`~/.local/share/goose/sessions/sessions.db`：messages+usage_ledger 表存在 ✔
 - `~/.iflow/projects/<slug>/session-*.jsonl`：Claude 同构、usage 全 0 ✔（配合官方停服公告 → 不做）
 - daemon Node v24.14.1 `node:sqlite` DatabaseSync 可用 ✔；`~/.paseo/opencode-home/` 存在（daemon 给 opencode 型 Provider 的隔离 home）✔
+
+## 7. 实现备注（2026-10-27，与 §2/§3 两处推荐的偏离）
+
+1. **账本版本不随加源 bump**（§2.1 写了「加源必须 bump」）：实现保持 `version: 2`——新源的 `z.enum` 本身就会让旧读者解析失败并走隔离重导，bump 反而强迫所有存量用户全量重导一次；见 `persistence.ts` 注释。
+2. **`PI_CONFIG_DIR` 只进 `defaultRoots`，不进 Provider 发现**（§3.1 建议加进 `CONFIG_ENV`）：`providerRoots` 只消费 `CONFIG_ENV` 的前两槽（session 目录、agent 目录），第三槽是死配置；Provider 级换目录用 `PI_CODING_AGENT_DIR`，README 已写明。
+3. 本机实证后补的事实：本机 OpenCode 为 1.19.4、`opencode.db` 为主数据源（§3.2 写作「本机仍为 legacy 布局」，批次 2 实施时已按双后端实现）。

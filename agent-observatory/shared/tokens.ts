@@ -50,8 +50,10 @@ export const tokenSourceNames: Record<TokenSource, string> = { claude: "Claude C
 /** Provider breakdown row of the sessions no Paseo agent matches (run in a terminal, or the agent was deleted). */
 export const TOKEN_UNMATCHED = "__unmatched__";
 /** Log roots watched at once: the standard ones plus custom providers' config directories (server/tokens/roots). Ten
- * sources with their environment-moved and standard directories need more than the 16 this used to be; a reader capped
- * lower quarantines such a ledger and imports its logs again. */
+ * sources with their environment-moved and standard directories need more than the 16 this used to be — with every
+ * source's variable aimed elsewhere the defaults reach 22, leaving 2 slots for provider discovery (a Provider whose
+ * roots do not fit is skipped without a notice); a reader capped lower quarantines such a ledger and imports its logs
+ * again. */
 export const MAX_TOKEN_ROOTS = 24;
 /** Codex's folder of archived sessions (a rollout moves there when its session is archived); shown apart in the coverage line. */
 export const isArchivedLogRoot = (path: string): boolean => /[\\/]archived_sessions[\\/]?$/.test(path);
