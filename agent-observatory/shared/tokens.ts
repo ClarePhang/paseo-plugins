@@ -53,7 +53,7 @@ export const TOKEN_UNMATCHED = "__unmatched__";
  * of the live speed and the fastest list. Every source must appear, so adding one forces the decision. */
 export const WHOLE_TURN_SOURCES: Readonly<Record<TokenSource, boolean>> = { claude: false, codex: false, grok: true, pi: false, omp: false, opencode: false, codebuddy: true, qoder: false, gemini: true, qwen: false, cline: true, roo: true, kilo: true, hermes: true, mimo: false, dsh: true };
 /** Log roots watched at once: the standard ones plus custom providers' config directories (server/tokens/roots). With
- * sixteen sources the defaults reach 46 (platform host directories included), and the cap must stay above that (a
+ * sixteen sources the defaults reach 44 (platform host directories included), and the cap must stay above that (a
  * reader capped lower quarantines such a ledger and imports its logs again; a Provider whose discovered roots do not
  * fit is skipped without a notice). */
 export const MAX_TOKEN_ROOTS = 48;

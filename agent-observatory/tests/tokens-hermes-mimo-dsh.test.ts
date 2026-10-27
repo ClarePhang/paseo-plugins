@@ -29,15 +29,14 @@ test("Hermes: closed sessions emit their per-model aggregates; open sessions and
   const session = (id: string, parent: string | null, ended: number | null) => db.prepare("INSERT INTO sessions VALUES (?, ?, '/home/me/app', ?, ?)").run(id, parent, ended, NOW - 3_600_000);
   const usage = (session: string, model: string, calls: number, input: number, out: number, read: number, write: number, reason: number, seen: number) =>
     db.prepare("INSERT INTO session_model_usage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(session, model, calls, input, out, read, write, reason, seen, seen);
-  session("h-ses-1", null, NOW - 60_000);
-  session("h-sub", "h-ses-1", NOW - 50_000);
+  session("h-ses-1", null, (NOW - 60_000) / 1000);
+  session("h-sub", "h-ses-1", (NOW - 50_000) / 1000);
   session("h-open", null, null); // still running: not counted yet
   usage("h-ses-1", "hm-test-model", 3, 1_000, 200, 5_000, 100, 20, (NOW - 60_000) / 1000);
   usage("h-sub", "hm-test-model", 1, 300, 50, 0, 0, 5, (NOW - 50_000) / 1000);
   usage("h-open", "hm-test-model", 1, 9_999, 0, 0, 0, 0, (NOW - 10_000) / 1000);
   db.close();
   await ingester.backfillAll();
-  console.log("DIAG hermes:", JSON.stringify({ files: ingester.files.size, roots: ingester.roots.map(r => ({ s: r.source, files: r.files, error: r.error })), diag: ingester.diagnostics, dbTracked: [...ingester.files.keys()].filter(k => k.endsWith(".db")) }));
   const rows = [...calls.values()].sort((a, b) => a.at - b.at);
   assert.deepEqual(rows.map(call => [call.source, call.sessionId, call.model, call.input, call.cacheRead, call.cacheWrite, call.output, call.reasoning, call.at, call.start, call.subagent, call.calls ?? 1]), [
     ["hermes", "h-ses-1", "hm-test-model", 1_000, 5_000, 100, 200, 20, NOW - 60_000, null, false, 3],
