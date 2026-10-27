@@ -1897,7 +1897,7 @@
     "message4": "；",
     "tokenStatisticsAreTemporarilyUnavailable": "Token 统计暂时读不到",
     "noTokenDataYet": "还没有 Token 数据",
-    "localClaudeCodeCodexGrokCli": "本机 Claude Code、Codex、Grok CLI、Pi、oh-my-pi（omp）、OpenCode、CodeBuddy、Qoder、Gemini CLI 和 Qwen Code 的会话日志会在这里汇总",
+    "localClaudeCodeCodexGrokCli": "本机 Claude Code、Codex、Grok CLI、Pi、oh-my-pi（omp）、OpenCode、CodeBuddy、Qoder、Gemini CLI、Qwen Code、Cline、Roo Code 和 Kilo Code 的会话日志会在这里汇总",
     "retry": "重试",
     "tokenStatisticsSyncFailedShowingThe": "Token 统计同步失败，显示的是上次结果：{value1}",
     "modelUsage": "模型用量",

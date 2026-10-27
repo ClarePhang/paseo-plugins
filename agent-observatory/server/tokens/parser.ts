@@ -41,10 +41,13 @@ export function initialParser(path: string, parentSession: string | null, source
   const grok = source === "grok" || (source === undefined && basename(path) === GROK_USAGE_FILE);
   // OpenCode: a legacy message file's session is its directory; the database file's id is never used.
   const opencodeSession = source === "opencode" && basename(path) !== "opencode.db" ? basename(dirname(path)) : null;
+  // Cline / Roo / Kilo: a task transcript's session is its task directory.
+  const clineSession = source === "cline" || source === "roo" || source === "kilo" ? basename(dirname(path)) : null;
   let sessionId: string;
   if (parentSession) sessionId = parentSession;
   else if (grok) sessionId = basename(dirname(path));
-  else if (opencodeSession) sessionId = opencodeSession;
+  else if (opencodeSession !== null) sessionId = opencodeSession;
+  else if (clineSession !== null) sessionId = clineSession;
   else if (source === "pi" || source === "omp") sessionId = piSessionId(name);
   else if (name.startsWith("rollout-")) sessionId = name.match(/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i)?.[1] ?? name;
   else sessionId = name;
@@ -325,6 +328,39 @@ function parseQwenLine(lineText: string, file: LogFile, sink: CallSink): void {
     cwd: state.cwd, model: text(row.model, 240) || state.model, at, start: validStart(state.inputAt, at), input,
     cacheWrite: 0, cacheRead, output, reasoning: Math.min(output, count(usage.thoughtsTokenCount)), subagent: false };
   emit(file, { call, forked: false }, state.inputAt, sink);
+}
+
+/**
+ * Cline / Roo Code / Kilo Code (2.18), one call per `api_req_started` row of a task's `ui_messages.json` (a whole-file
+ * JSON document the extension rewrites atomically): `tokensIn` is the fresh prompt (the cache rides beside it as
+ * `cacheWrites`/`cacheReads`), `tokensOut` the output, and there is no response time. A row without token numbers is
+ * the placeholder written before streaming — not a call. `subagent_usage` rows are a sub-agent's aggregated batch.
+ * Keyed by the row's `ts`, so a rewritten file counts once. The model id is not persisted per request.
+ */
+export function parseClineDoc(content: string, file: LogFile, sink: CallSink): boolean {
+  let rows: unknown;
+  try { rows = JSON.parse(content); } catch { return false; }
+  if (!Array.isArray(rows)) return true;
+  const state = file.state;
+  for (const entry of rows.slice(-20_000)) {
+    const row = object(entry);
+    const say = text(row.say, 64);
+    const subagent = say === "subagent_usage";
+    if (say !== "api_req_started" && !subagent) continue;
+    let report: unknown;
+    try { report = JSON.parse(String(row.text ?? "")); } catch { continue; }
+    if (!report || typeof report !== "object" || Array.isArray(report)) continue;
+    const usage = report as Record<string, unknown>;
+    const at = stamp(row.ts);
+    if (at === null) continue;
+    const input = count(usage.tokensIn), cacheWrite = count(usage.cacheWrites), cacheRead = count(usage.cacheReads), output = count(usage.tokensOut);
+    if (!input && !cacheWrite && !cacheRead && !output) continue;
+    const call: LedgerCall = { key: callKey([file.source, state.sessionId, String(at), input, output]), source: file.source,
+      sessionId: state.sessionId, cwd: state.cwd, model: null, at, start: null, input, cacheWrite, cacheRead, output,
+      reasoning: 0, subagent };
+    emit(file, { call, forked: false }, null, sink);
+  }
+  return true;
 }
 
 /** A cheap discriminator precedes JSON.parse; parsed objects never escape this function. */

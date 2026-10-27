@@ -1,6 +1,6 @@
 import { t } from "../../shared/text";
 import { basename } from "node:path";
-import { emptyTokenCounts, type TokenCounts, type TokenSource } from "../../shared/tokens";
+import { emptyTokenCounts, WHOLE_TURN_SOURCES, type TokenCounts, type TokenSource } from "../../shared/tokens";
 import { DAY, dayOf, hourOf, type LedgerCall } from "./types";
 
 interface SettledBounds { settledFirstAt?: number; settledLastAt?: number }
@@ -80,7 +80,7 @@ const sortRecords = (items: CallRecord[], kind: "fastest" | "biggest"): CallReco
  */
 function callRecord(call: LedgerCall, kind: "fastest" | "biggest"): CallRecord | null {
   const ms = call.start === null ? 0 : call.at - call.start;
-  if (kind === "fastest" ? ms < 1000 || call.output < 100 : modelCalls(call) > 1 || call.source === "grok" || call.source === "codebuddy" || call.source === "gemini") return null;
+  if (kind === "fastest" ? ms < 1000 || call.output < 100 : modelCalls(call) > 1 || WHOLE_TURN_SOURCES[call.source]) return null;
   return { key: call.key, at: call.at, model: call.model, output: call.output, tps: ms ? call.output / ms * 1000 : 0 };
 }
 function record(data: TokenData, call: LedgerCall, sign: number): void {

@@ -38,6 +38,11 @@ const CONFIG_ENV: Record<TokenSource, ReadonlyArray<{ name: string; folders: rea
   qoder: [{ name: "QODER_CONFIG_DIR", folders: ["projects"], standard: home => join(home, ".qoder") }],
   gemini: [{ name: "GEMINI_CLI_HOME", folders: ["tmp"], standard: home => join(home, ".gemini") }],
   qwen: [{ name: "QWEN_RUNTIME_DIR", folders: ["projects"], standard: home => join(home, ".qwen") }],
+  // Cline / Roo / Kilo live in VS Code family globalStorage directories, which no variable moves; the platform
+  // host directories are standard roots (defaultRoots), and provider discovery has nothing to add for them.
+  cline: [],
+  roo: [],
+  kilo: [],
 };
 /** Directories one variable may name when the text cannot tell which assignment wins (the latest ones are kept). */
 const MAX_CANDIDATES = 3;
@@ -63,6 +68,29 @@ export interface RootContext {
 }
 
 const piAgentDir = (home: string, env: RootContext["env"]): string => env.PI_CODING_AGENT_DIR || join(home, ".pi", "agent");
+
+/** VS Code family hosts whose globalStorage may hold task transcripts, in the usual install names. */
+const VSCODE_HOSTS = ["Code", "Code - Insiders", "VSCodium", "Cursor", "Windsurf"] as const;
+/** The Cline / Roo / Kilo extension ids under those hosts' globalStorage. */
+const CLINE_FAMILY_EXT_IDS = ["saoudrizwan.claude-dev", "rooveterinaryinc.roo-cline", "kilocode.kilo-code"] as const;
+const CLINE_FAMILY_SOURCES = ["cline", "roo", "kilo"] as const;
+/** globalStorage bases for the running platform: the desktop hosts, plus the remote servers on Linux. */
+function vscodeGlobalStorageBases(home: string): string[] {
+  if (process.platform === "darwin") return VSCODE_HOSTS.map(host => join(home, "Library", "Application Support", host, "User", "globalStorage"));
+  if (process.platform === "win32") return VSCODE_HOSTS.map(host => join(home, "AppData", "Roaming", host, "User", "globalStorage"));
+  const desktop = VSCODE_HOSTS.map(host => join(home, ".config", host, "User", "globalStorage"));
+  return [...desktop, join(home, ".vscode-server", "data", "User", "globalStorage"), join(home, ".vscode-server-insiders", "data", "User", "globalStorage")];
+}
+/** One root per Cline family extension per globalStorage base. */
+function clineFamilyRoots(home: string): LogRoot[] {
+  const roots: LogRoot[] = [];
+  for (const [index, extId] of CLINE_FAMILY_EXT_IDS.entries()) {
+    for (const base of vscodeGlobalStorageBases(home)) {
+      roots.push({ source: CLINE_FAMILY_SOURCES[index], path: join(base, extId, "tasks") });
+    }
+  }
+  return roots;
+}
 const ompAgentDir = (home: string, env: RootContext["env"]): string => env.PI_CODING_AGENT_DIR || join(home, env.PI_CONFIG_DIR || ".omp", "agent");
 
 /** The roots checked on every host: the daemon's own environment, then the standard locations. */
@@ -97,6 +125,8 @@ export function defaultRoots(context: Pick<RootContext, "home" | "env"> = { home
     { source: "gemini", path: join(home, ".gemini", "tmp") },
     { source: "qwen", path: join(env.QWEN_RUNTIME_DIR || join(home, ".qwen"), "projects") },
     { source: "qwen", path: join(home, ".qwen", "projects") },
+    // 2.18: Cline / Roo Code / Kilo Code task transcripts in every VS Code family host's globalStorage.
+    ...clineFamilyRoots(home),
   ];
   return roots.filter((root, index) => roots.findIndex(other => resolve(other.path) === resolve(root.path)) === index);
 }
@@ -205,7 +235,7 @@ const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^grok(?:$|[-_.])/i
  */
 export function providerSource(id: string, entry: { extends?: unknown; command?: unknown }): TokenSource | null {
   const base = typeof entry.extends === "string" && entry.extends.trim() ? entry.extends.trim() : id;
-  if (base === "claude" || base === "codex" || base === "pi" || base === "omp" || base === "opencode" || base === "codebuddy" || base === "qoder" || base === "gemini" || base === "qwen") return base;
+  if (base === "claude" || base === "codex" || base === "pi" || base === "omp" || base === "opencode" || base === "codebuddy" || base === "qoder" || base === "gemini" || base === "qwen" || base === "cline" || base === "roo" || base === "kilo") return base;
   if (base !== "acp") return null;
   for (const word of commandPrograms(entry.command)) {
     const name = basename(word), source = ACP_COMMANDS.find(([pattern]) => pattern.test(name))?.[1];
@@ -485,6 +515,7 @@ export async function providerRoots(providers: Readonly<Record<string, unknown>>
     if (!source) continue;
     const add = (path: string, via: DiscoveredRoot["via"]) => { if (!found.some(root => root.provider === id && root.path === path)) found.push({ source, path, provider: id, via }); };
     const [first, agent] = CONFIG_ENV[source], unset: Candidate[] = [];
+    if (!first) continue;
     for (const value of (await candidates(entry, first!.name, context, read)).reverse()) {
       const directory = value.path ?? first!.standard?.(context.home) ?? null;
       if (!directory) unset.push(value);

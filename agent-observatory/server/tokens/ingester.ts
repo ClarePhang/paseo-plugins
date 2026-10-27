@@ -29,11 +29,16 @@ const SEEN_DAYS = 60;
 /** Session ids whose lost logs are remembered (`noteLoss`); past it the oldest go, and what they covered can no longer be vouched for. */
 const MAX_LOSSES = 20_000;
 
+/** A Cline / Roo / Kilo task transcript: `ui_messages.json` inside the task's directory. */
+const isTaskMessages = (source: LogRoot["source"], name: string): boolean =>
+  (source === "cline" || source === "roo" || source === "kilo") && name === "ui_messages.json";
 /**
  * Which files of a root are logs: Claude Code and Pi write one `.jsonl` per session, Codex `rollout-*.jsonl`. Grok
- * keeps a directory per session and is walked apart (`scanGrok`).
+ * keeps a directory per session and is walked apart (`scanGrok`). Cline / Roo / Kilo write one `ui_messages.json`
+ * per task, walked normally.
  */
-const isLog = (source: LogRoot["source"], name: string): boolean => name.endsWith(".jsonl") && (source !== "codex" || name.startsWith("rollout-"));
+const isLog = (source: LogRoot["source"], name: string): boolean =>
+  name.endsWith(".jsonl") && (source !== "codex" || name.startsWith("rollout-")) || isTaskMessages(source, name);
 /** A sub-agent's log (`<session>/subagents/<agent>.jsonl`): its parent session's, never the place a prompt is logged. */
 const subagentLog = (source: LogRoot["source"], path: string): boolean => (source === "claude" || source === "codebuddy") && basename(dirname(path)) === "subagents";
 /** A Grok session group's working directory, from its URL-encoded name; null when the name is not one (a long cwd's slug). */

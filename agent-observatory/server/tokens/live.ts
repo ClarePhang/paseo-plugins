@@ -1,4 +1,4 @@
-import { tokenInput, tokenTotal, type TokenLive, type TokenLiveAgent } from "../../shared/tokens";
+import { tokenInput, tokenTotal, WHOLE_TURN_SOURCES, type TokenLive, type TokenLiveAgent } from "../../shared/tokens";
 import type { StatsDirectory } from "../stats-directory";
 import { statsLocalDay, statsZone, type StatsDirectoryAgent } from "../stats-types";
 import { modelCalls, rootSession, sessionKey, type TokenData } from "./data";
@@ -49,7 +49,7 @@ export function buildTokenLive(data: TokenData, input: { windowMinutes: 30 | 60;
     // A whole-turn record (a Grok turn, a CodeBuddy step, a Gemini response) is logged when it ends with no response
     // time: dropped into one 10 s bucket it would read as a burst of thousands of tokens per second. It counts in
     // today's totals (the hour buckets), not in the live speed.
-    if (call.at > now || call.source === "grok" || call.source === "codebuddy" || call.source === "gemini") continue;
+    if (call.at > now || WHOLE_TURN_SOURCES[call.source]) continue;
     const endIndex = Math.floor((call.at - start) / BUCKET);
     if (input.detail === "full") {
       spread(call, start, output);
