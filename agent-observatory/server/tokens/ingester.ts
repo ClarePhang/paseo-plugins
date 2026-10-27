@@ -34,8 +34,8 @@ const MAX_LOSSES = 20_000;
  * keeps a directory per session and is walked apart (`scanGrok`).
  */
 const isLog = (source: LogRoot["source"], name: string): boolean => name.endsWith(".jsonl") && (source !== "codex" || name.startsWith("rollout-"));
-/** A Claude Code subagent's log (`<session>/subagents/<agent>.jsonl`): its parent session's, never the place a prompt is logged. */
-const subagentLog = (source: LogRoot["source"], path: string): boolean => source === "claude" && basename(dirname(path)) === "subagents";
+/** A sub-agent's log (`<session>/subagents/<agent>.jsonl`): its parent session's, never the place a prompt is logged. */
+const subagentLog = (source: LogRoot["source"], path: string): boolean => (source === "claude" || source === "codebuddy") && basename(dirname(path)) === "subagents";
 /** A Grok session group's working directory, from its URL-encoded name; null when the name is not one (a long cwd's slug). */
 function grokGroupCwd(name: string): string | null {
   try { const cwd = decodeURIComponent(name); return isAbsolute(cwd) ? cwd : null; } catch { return null; }

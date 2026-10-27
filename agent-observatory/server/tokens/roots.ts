@@ -34,6 +34,8 @@ const CONFIG_ENV: Record<TokenSource, ReadonlyArray<{ name: string; folders: rea
   omp: [{ name: "PI_CODING_AGENT_SESSION_DIR", folders: [""], standard: null }, { name: "PI_CODING_AGENT_DIR", folders: ["sessions"], standard: home => join(home, ".omp", "agent") }],
   // OpenCode moves with XDG_DATA_HOME (there is no dedicated variable in OpenCode itself).
   opencode: [{ name: "XDG_DATA_HOME", folders: ["opencode"], standard: home => join(home, ".local", "share", "opencode") }],
+  codebuddy: [{ name: "CODEBUDDY_CONFIG_DIR", folders: ["projects"], standard: home => join(home, ".codebuddy") }],
+  qoder: [{ name: "QODER_CONFIG_DIR", folders: ["projects"], standard: home => join(home, ".qoder") }],
 };
 /** Directories one variable may name when the text cannot tell which assignment wins (the latest ones are kept). */
 const MAX_CANDIDATES = 3;
@@ -81,6 +83,11 @@ export function defaultRoots(context: Pick<RootContext, "home" | "env"> = { home
     // 2.18: OpenCode. Its data directory holds the database and the legacy storage tree beside each other.
     { source: "opencode", path: join(env.XDG_DATA_HOME || join(home, ".local", "share"), "opencode") },
     { source: "opencode", path: join(home, ".local", "share", "opencode") },
+    // 2.18: CodeBuddy Code and Qoder keep one `.jsonl` per session under their projects directory.
+    { source: "codebuddy", path: join(env.CODEBUDDY_CONFIG_DIR || join(home, ".codebuddy"), "projects") },
+    { source: "codebuddy", path: join(home, ".codebuddy", "projects") },
+    { source: "qoder", path: join(env.QODER_CONFIG_DIR || join(home, ".qoder"), "projects") },
+    { source: "qoder", path: join(home, ".qoder", "projects") },
   ];
   return roots.filter((root, index) => roots.findIndex(other => resolve(other.path) === resolve(root.path)) === index);
 }
@@ -189,7 +196,7 @@ const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^grok(?:$|[-_.])/i
  */
 export function providerSource(id: string, entry: { extends?: unknown; command?: unknown }): TokenSource | null {
   const base = typeof entry.extends === "string" && entry.extends.trim() ? entry.extends.trim() : id;
-  if (base === "claude" || base === "codex" || base === "pi" || base === "omp" || base === "opencode") return base;
+  if (base === "claude" || base === "codex" || base === "pi" || base === "omp" || base === "opencode" || base === "codebuddy" || base === "qoder") return base;
   if (base !== "acp") return null;
   for (const word of commandPrograms(entry.command)) {
     const name = basename(word), source = ACP_COMMANDS.find(([pattern]) => pattern.test(name))?.[1];

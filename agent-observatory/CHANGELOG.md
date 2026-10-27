@@ -15,6 +15,13 @@
 - Where the data lives: `$XDG_DATA_HOME/opencode`, by default `~/.local/share/opencode`. OpenCode has no dedicated data-directory variable (the `OPENCODE_DATA_DIR` some tools read is not OpenCode's), and a provider id or `extends: "opencode"` is recognised like the other bases.
 - A saved ledger never changes shape: readers older than this release quarantine it once it holds OpenCode entries and import their logs again, so the ledger version stays 2.
 
+**CodeBuddy Code and Qoder in the Token page**
+- Token statistics now count CodeBuddy Code ("CodeBuddy", blue) and Qoder ("Qoder", green) as well. Each session is one `.jsonl` under their projects directory (`$CODEBUDDY_CONFIG_DIR/projects`, by default `~/.codebuddy/projects`; `$QODER_CONFIG_DIR/projects`, by default `~/.qoder/projects`), and a provider id or `extends` of either is recognised like the other bases.
+- CodeBuddy counts one call per `function_call` row: its `providerData` carries the usage of the model response the step belongs to, as a summary with the input cache-inclusive (the cached part comes out of `inputTokensDetails`), or, when that is missing, the provider's raw OpenAI-shaped usage; the model is `requestModelId`. Rows of one step — parallel tool calls of one response — share the usage and count once. Sub-agent transcripts under the session's directory count for that session; the aggregate rows (`credit-usage`, `model-usage`) and the reasoning drafts are never calls. A row carries only its end time, so these calls have no response time and stay out of the live speed and the fastest list, like Grok's turns.
+- Qoder's transcript is Claude Code's shape one source over: one call per assistant row with the usage on it, the model from the session's `runtime-config` row, `isSidechain` rows as a sub-agent's, and gateway refusal rows (no usage) not counted.
+- Watching eight sources needs more roots than the sixteen a ledger could name: the cap is now twenty, and readers older than this release quarantine a ledger past their cap and import its logs again.
+- Both log only what they show above; Qoder's own accounting is Credits and OpenCode's an estimate, and the page counts tokens, never money.
+
 ## 2.17.1 · 2026-10-25
 
 **Paseo 0.13 support (0.12 keeps working)**

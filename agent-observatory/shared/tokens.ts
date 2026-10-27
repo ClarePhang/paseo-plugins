@@ -44,13 +44,15 @@ const iso = z.iso.datetime();
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const rate = z.number().nonnegative().finite();
 
-export const TOKEN_SOURCES = ["claude", "codex", "grok", "pi", "omp", "opencode"] as const;
+export const TOKEN_SOURCES = ["claude", "codex", "grok", "pi", "omp", "opencode", "codebuddy", "qoder"] as const;
 export type TokenSource = typeof TOKEN_SOURCES[number];
-export const tokenSourceNames: Record<TokenSource, string> = { claude: "Claude Code", codex: "Codex", grok: "Grok CLI", pi: "Pi", omp: "oh-my-pi", opencode: "OpenCode" };
+export const tokenSourceNames: Record<TokenSource, string> = { claude: "Claude Code", codex: "Codex", grok: "Grok CLI", pi: "Pi", omp: "oh-my-pi", opencode: "OpenCode", codebuddy: "CodeBuddy", qoder: "Qoder" };
 /** Provider breakdown row of the sessions no Paseo agent matches (run in a terminal, or the agent was deleted). */
 export const TOKEN_UNMATCHED = "__unmatched__";
-/** Log roots watched at once: the standard ones plus custom providers' config directories (server/tokens/roots). */
-export const MAX_TOKEN_ROOTS = 16;
+/** Log roots watched at once: the standard ones plus custom providers' config directories (server/tokens/roots). Eight
+ * sources with their environment-moved and standard directories need more than the 16 this used to be; a reader capped
+ * lower quarantines such a ledger and imports its logs again. */
+export const MAX_TOKEN_ROOTS = 20;
 /** Codex's folder of archived sessions (a rollout moves there when its session is archived); shown apart in the coverage line. */
 export const isArchivedLogRoot = (path: string): boolean => /[\\/]archived_sessions[\\/]?$/.test(path);
 

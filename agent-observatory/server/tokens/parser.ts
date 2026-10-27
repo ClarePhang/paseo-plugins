@@ -181,9 +181,89 @@ export function parseOpendencodeDoc(content: string, file: LogFile, sink: CallSi
   return true;
 }
 
+/**
+ * Qoder (2.18), Claude Code's transcript shape one source over: assistant rows carry the usage and their message id,
+ * the model comes from a `runtime-config` row, `isSidechain` marks a sub-agent's rows, and an error row (a gateway
+ * refusal) carries no usage at all. Counted like Claude: one call per assistant row, keyed by its message id.
+ */
+function parseQoderLine(line: string, file: LogFile, sink: CallSink): void {
+  if (!/"type"\s*:\s*"(?:assistant|user|runtime-config)"/.test(line)) return;
+  let row: ObjectValue;
+  try { row = object(JSON.parse(line)); } catch { return; }
+  const state = file.state;
+  if (row.type === "runtime-config") { state.model = text(row.model, 240) || state.model; return; }
+  const session = text(row.sessionId, 256) || state.sessionId;
+  state.sessionId = session; remember(state.sessions, session);
+  if (typeof row.cwd === "string") state.cwd = text(row.cwd, 4096);
+  const at = stamp(row.timestamp);
+  if (row.type === "user") { if (at !== null) state.inputAt = at; return; }
+  if (row.type !== "assistant" || at === null || row.isApiErrorMessage === true) return;
+  const message = object(row.message), usage = object(message.usage), messageId = text(message.id, 1024);
+  if (!messageId || !Object.keys(usage).length) return;
+  // A failed request writes an all-zero usage: no tokens, and not a call that produced anything.
+  const input = count(usage.input_tokens), cacheWrite = count(usage.cache_creation_input_tokens), cacheRead = count(usage.cache_read_input_tokens);
+  if (!input && !cacheWrite && !cacheRead && !count(usage.output_tokens)) return;
+  const call: LedgerCall = { key: callKey(["qoder", messageId]), source: "qoder", sessionId: session, cwd: state.cwd,
+    model: text(message.model, 240) || state.model, at, start: validStart(state.inputAt, at),
+    input, cacheWrite, cacheRead,
+    output: count(usage.output_tokens), reasoning: 0, subagent: row.isSidechain === true };
+  emit(file, { call, forked: false }, state.inputAt, sink);
+}
+
+/**
+ * CodeBuddy (2.18), one call per usage-bearing row: a `function_call` step or an assistant `message` row, whose
+ * `providerData` carries the usage of the model response it belongs to — as a summary (`usage`, input cache-inclusive
+ * with the cached part in `inputTokensDetails`), or, when that is missing, the provider's raw OpenAI-shaped usage. Rows
+ * of one response share the usage and the key, so a step counts once whatever shape carried it. The model is
+ * `requestModelId`; the row's end timestamp is all there is, so the call has no response time. Aggregate rows
+ * (`credit-usage`, `model-usage`) and drafts (`reasoning`) are never calls.
+ */
+function parseCodebuddyLine(line: string, file: LogFile, sink: CallSink): void {
+  if (!/"type"\s*:\s*"(?:session-meta|function_call|message)"/.test(line)) return;
+  let row: ObjectValue;
+  try { row = object(JSON.parse(line)); } catch { return; }
+  const state = file.state;
+  if (row.type === "session-meta") {
+    state.sessionId = text(row.sessionId, 256) || state.sessionId; remember(state.sessions, state.sessionId);
+    return;
+  }
+  const at = stamp(row.timestamp);
+  const provider = object(row.providerData), usage = object(provider.usage), raw = object(provider.rawUsage);
+  if (at === null || (!Object.keys(usage).length && !Object.keys(raw).length)) return;
+  const session = text(row.sessionId, 256) || state.sessionId;
+  state.sessionId = session; remember(state.sessions, session);
+  if (typeof row.cwd === "string") state.cwd = text(row.cwd, 4096);
+  const inputDetails = Array.isArray(usage.inputTokensDetails) ? object(usage.inputTokensDetails[0]) : {};
+  const outputDetails = Array.isArray(usage.outputTokensDetails) ? object(usage.outputTokensDetails[0]) : {};
+  const promptDetails = object(raw.prompt_tokens_details), completionDetails = object(raw.completion_tokens_details);
+  let cacheRead: number, cacheWrite: number, output: number, reasoning: number, total: number;
+  if (Object.keys(usage).length) {
+    total = count(usage.inputTokens);
+    cacheRead = Math.min(total, count(inputDetails.cached_tokens));
+    cacheWrite = count(raw.cache_creation_input_tokens);
+    output = count(usage.outputTokens); reasoning = Math.min(output, count(outputDetails.reasoning_tokens));
+  } else {
+    total = count(raw.prompt_tokens);
+    cacheRead = Math.min(total, count(raw.prompt_cache_hit_tokens) || count(promptDetails.cached_tokens));
+    cacheWrite = count(raw.cache_creation_input_tokens);
+    output = count(raw.completion_tokens); reasoning = Math.min(output, count(completionDetails.reasoning_tokens));
+  }
+  const input = Math.max(0, total - cacheRead - cacheWrite);
+  if (!input && !cacheRead && !cacheWrite && !output) return;
+  const model = text(provider.requestModelId, 240) || text(provider.model, 240) || state.model;
+  state.model = model;
+  const response = text(provider.messageId, 256) || text(row.callId, 256) || text(row.id, 64);
+  const call: LedgerCall = { key: callKey(["codebuddy", session, response, count(provider.stepSeq)]), source: "codebuddy",
+    sessionId: session, cwd: state.cwd, model, at, start: null, input, cacheWrite, cacheRead, output, reasoning,
+    subagent: file.parentSession !== null };
+  emit(file, { call, forked: false }, null, sink);
+}
+
 /** A cheap discriminator precedes JSON.parse; parsed objects never escape this function. */
 export function parseLine(line: string, file: LogFile, sink: CallSink): void {
   if (file.source === "pi" || file.source === "omp") { parsePiLine(line, file, sink); return; }
+  if (file.source === "qoder") { parseQoderLine(line, file, sink); return; }
+  if (file.source === "codebuddy") { parseCodebuddyLine(line, file, sink); return; }
   if (file.source === "grok") return; // a JSON document, not lines: parseGrokUsage
   if (file.source === "claude") {
     if (!/"type"\s*:\s*"(?:assistant|user)"/.test(line)) return;
