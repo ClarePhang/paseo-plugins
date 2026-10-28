@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+**The event stream names Agents from the directory**
+- The 并行泳道 and the event list now show each Agent's current directory name instead of the title frozen into the recorded event. Interactive Agents record their first events before the host has generated their title, so those events kept the 「未命名 Agent」 placeholder forever even after the name existed; the swimlane lanes, the feed rows and their accessibility labels resolve the name from the Agent directory first and fall back to the stored title, which also renames past events retroactively. Agents no longer in the directory keep their stored title.
+
 ## 2.18.0 · 2026-10-27
 
 **oh-my-pi (omp) in the Token page**

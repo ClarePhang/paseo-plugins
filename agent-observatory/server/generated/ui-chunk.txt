@@ -14692,22 +14692,20 @@ var import_react43 = require("react");
 var import_react_native68 = require("react-native");
 var import_react_native69 = require("@getpaseo/plugin/client/react-native");
 
-// client/swimlane.tsx
-var import_react42 = require("react");
-var import_react_native66 = require("react-native");
-var import_react_native67 = require("@getpaseo/plugin/client/react-native");
-
 // shared/swimlane.ts
 var ends = { turn_completed: "completed", turn_failed: "failed", turn_canceled: "canceled" };
-function buildSwimlanes(events, live2, now, windowMs, limit) {
+function eventAgentTitle(event, titles2) {
+  return titles2?.get(event.agentId) || event.agentTitle;
+}
+function buildSwimlanes(events, live2, now, windowMs, limit, titles2) {
   const from = now - windowMs;
   const byAgent = /* @__PURE__ */ new Map();
   const sorted = [...events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   for (const event of sorted) {
     const at2 = Date.parse(event.at);
     if (!Number.isFinite(at2)) continue;
-    const state = byAgent.get(event.agentId) ?? { title: event.agentTitle, spans: [] };
-    if (event.agentTitle) state.title = event.agentTitle;
+    const state = byAgent.get(event.agentId) ?? { title: eventAgentTitle(event, titles2), spans: [] };
+    state.title = eventAgentTitle(event, titles2);
     byAgent.set(event.agentId, state);
     const kind = ends[event.type];
     if (event.type === "turn_started") state.turn = at2;
@@ -14750,6 +14748,9 @@ function swimTicks(now, windowMs, utcOffsetMinutes) {
 }
 
 // client/swimlane.tsx
+var import_react42 = require("react");
+var import_react_native66 = require("react-native");
+var import_react_native67 = require("@getpaseo/plugin/client/react-native");
 var import_jsx_runtime36 = require("react/jsx-runtime");
 var windows = { "1h": 36e5, "6h": 6 * 36e5, "24h": 24 * 36e5 };
 var looks = {
@@ -14778,8 +14779,9 @@ var Swimlane = (0, import_react42.memo)(function Swimlane2({ theme, events, agen
     for (const agent of agents) if (agent.status === "running" || agent.status === "waiting") result.set(agent.id, agent.status);
     return result;
   }, [agents]);
+  const titles2 = (0, import_react42.useMemo)(() => new Map(agents.map((agent) => [agent.id, agent.title])), [agents]);
   const windowMs = windows[range];
-  const { lanes, peak, peakAt, turns, hidden } = (0, import_react42.useMemo)(() => buildSwimlanes(events, live2, now, windowMs, compact ? 6 : 8), [events, live2, now, windowMs, compact]);
+  const { lanes, peak, peakAt, turns, hidden } = (0, import_react42.useMemo)(() => buildSwimlanes(events, live2, now, windowMs, compact ? 6 : 8, titles2), [events, live2, now, windowMs, compact, titles2]);
   const labelWidth = compact ? 88 : 150, track = Math.max(0, width - labelWidth - space.sm), from = now - windowMs;
   const x = (at2) => (at2 - from) / windowMs * track;
   const ticks = swimTicks(now, windowMs, -new Date(now).getTimezoneOffset());
@@ -14854,7 +14856,7 @@ function Pulse({ theme, events, now, telemetry }) {
     /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(import_react_native68.View, { accessibilityLabel: t2("coreActivityFeed.eventsInTheLastHourTwoAnd", { value1: total }), style: { flexDirection: "row", alignItems: "flex-end", gap: 3, height: 28, borderBottomWidth: hairline, borderBottomColor: theme.colors.border }, children: bins.map((bin, index) => /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(import_react_native68.View, { style: { flex: 1, height: bin ? Math.max(3, bin / peak * 26) : 0, borderTopLeftRadius: 2, borderTopRightRadius: 2, backgroundColor: bar, opacity: 0.85 } }, index)) })
   ] });
 }
-var EventRow = (0, import_react43.memo)(function EventRow2({ event, theme, time: time2, selected, fresh, onSelect }) {
+var EventRow = (0, import_react43.memo)(function EventRow2({ event, theme, time: time2, selected, fresh, onSelect, titles: titles2 }) {
   const label = eventLabel(event);
   return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Enter, { active: fresh, children: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
     Row,
@@ -14864,10 +14866,10 @@ var EventRow = (0, import_react43.memo)(function EventRow2({ event, theme, time:
       titleLines: 1,
       selected,
       onPress: () => onSelect(event.agentId),
-      accessibilityLabel: t2("coreActivityFeed.view", { value1: event.agentTitle || t2("coreActivityFeed.untitledAgent"), value2: label }),
+      accessibilityLabel: t2("coreActivityFeed.view", { value1: eventAgentTitle(event, titles2) || t2("coreActivityFeed.untitledAgent"), value2: label }),
       leading: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(EventGlyph, { theme, type: event.type }),
       trailing: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(import_react_native68.Text, { style: { color: theme.colors.foregroundMuted, fontSize: fontSize.meta, fontVariant: ["tabular-nums"] }, children: time2 }),
-      subtitle: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(MetaLine, { theme, parts: [event.agentTitle || event.agentId, event.durationMs !== void 0 ? t2("coreActivityFeed.took", { value1: shortDuration(event.durationMs) }) : null] })
+      subtitle: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(MetaLine, { theme, parts: [eventAgentTitle(event, titles2) || event.agentId, event.durationMs !== void 0 ? t2("coreActivityFeed.took", { value1: shortDuration(event.durationMs) }) : null] })
     }
   ) });
 });
@@ -14877,6 +14879,7 @@ function ActivityFeed({ events, theme, telemetry, onSelect, now, selectedId, age
   (0, import_react43.useEffect)(() => {
     if (known.current) for (const event of events) known.current.add(event.id);
   }, [events]);
+  const titles2 = (0, import_react43.useMemo)(() => new Map(agents.map((agent) => [agent.id, agent.title])), [agents]);
   return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
     import_react_native69.FlatList,
     {
@@ -14892,7 +14895,7 @@ function ActivityFeed({ events, theme, telemetry, onSelect, now, selectedId, age
         /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Pulse, { theme, events, now, telemetry })
       ] }),
       ListEmptyComponent: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(EmptyState, { theme, icon: "Activity", title: t2("coreActivityFeed.noExecutionEventsYet"), message: t2("coreActivityFeed.taskStartsCompletionsFailuresAndApprovalsAppear") }),
-      renderItem: ({ item }) => /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(EventRow, { event: item, theme, time: relativeTime(item.at, now), selected: item.agentId === selectedId, fresh: !!known.current && !known.current.has(item.id), onSelect })
+      renderItem: ({ item }) => /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(EventRow, { event: item, theme, time: relativeTime(item.at, now), selected: item.agentId === selectedId, fresh: !!known.current && !known.current.has(item.id), onSelect, titles: titles2 })
     }
   );
 }
