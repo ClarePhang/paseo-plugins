@@ -8,6 +8,9 @@
 **The event page says what the filters hide**
 - The event stream inherits the session list's scope filters, and when they hid events the page simply looked empty — indistinguishable from a broken capture. When the current filters hide retained events inside the selected time range, the page now shows a count ("当前筛选隐藏了 N 条事件") with a one-tap 清除筛选 that resets the status, read-state, attention and session-scope filters; it renders nothing when everything is visible.
 
+**dsh: the ledger's last day is no longer skipped**
+- The cost ledger's newest day was treated as still in progress by position, so with intermittent use — no day after it ever arriving — its usage was skipped forever: the unchanged file never re-parsed. A day now counts unless it is today by the local or the UTC calendar, and a calendar rollover re-reads the unchanged ledger once (deduplicated by the seen index as before). Found in review by Chengxin-Xu; the v4 session-log enhancement spec this review also laid out is recorded in `docs/harness-token-source-research.md` §9.
+
 ## 2.18.0 · 2026-10-27
 
 **oh-my-pi (omp) in the Token page**

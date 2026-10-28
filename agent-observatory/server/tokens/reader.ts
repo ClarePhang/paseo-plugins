@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { setImmediate as yieldLoop } from "node:timers/promises";
-import { initialParser, parseClineDoc, parseDshLedger, parseGrokUsage, parseLine, parseOpendencodeDoc } from "./parser";
+import { initialParser, dshDayStamp, parseClineDoc, parseDshLedger, parseGrokUsage, parseLine, parseOpendencodeDoc } from "./parser";
 import { isOpendencodeDb } from "./opencode-db";
 import type { CallSink, LogFile, ParserState } from "./types";
 
@@ -57,7 +57,8 @@ export async function tailFile(file: LogFile, sink: CallSink, onBytes?: (bytes: 
     return await (file.source === "grok" ? readWhole(file, handle, sink, parseGrokUsage, true, MAX_WHOLE_FILE, onBytes)
       : file.source === "opencode" && !isOpendencodeDb(file) ? readWhole(file, handle, sink, parseOpendencodeDoc, false, MAX_WHOLE_FILE, onBytes)
       : file.source === "cline" || file.source === "roo" || file.source === "kilo" ? readWhole(file, handle, sink, parseClineDoc, false, MAX_TASK_FILE, onBytes)
-      : file.source === "dsh" ? readWhole(file, handle, sink, parseDshLedger, false, MAX_TASK_FILE, onBytes)
+      // The ledger's newest day closes at midnight even when dsh never writes again; re-read across any calendar change.
+      : file.source === "dsh" ? readWhole(file, handle, sink, parseDshLedger, false, MAX_TASK_FILE, onBytes, file.state.day !== dshDayStamp())
       : tailOpen(file, handle, sink, onBytes, onReset));
   } finally { await handle.close(); }
 }
@@ -71,11 +72,11 @@ export async function tailFile(file: LogFile, sink: CallSink, onBytes?: (bytes: 
  */
 const MAX_WHOLE_FILE = 4 * 1024 * 1024, MAX_TASK_FILE = 64 * 1024 * 1024;
 async function readWhole(file: LogFile, handle: FileHandle, sink: CallSink, parse: (content: string, file: LogFile, sink: CallSink) => boolean,
-  workingDirectory: boolean, maxBytes: number, onBytes?: (bytes: number) => void): Promise<boolean> {
+  workingDirectory: boolean, maxBytes: number, onBytes?: (bytes: number) => void, force = false): Promise<boolean> {
   const details = await handle.stat();
   if (!details.isFile()) return false;
   const changed = details.dev !== file.dev || details.ino !== file.ino || details.size !== file.size || details.mtimeMs !== file.mtime;
-  if (!changed && file.offset === details.size) return false;
+  if (!force && !changed && file.offset === details.size) return false;
   file.dev = details.dev; file.ino = details.ino; file.size = details.size; file.mtime = details.mtimeMs; file.partialBytes = 0;
   if (details.size > maxBytes) { file.offset = details.size; return changed; }
   const buffer = Buffer.alloc(details.size);

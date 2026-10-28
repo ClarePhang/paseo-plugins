@@ -266,3 +266,33 @@
 5. 观察项：Comate CLI 审计、CodeBuddy stats API 交叉校验、通义灵码/Qoder CN 的 CN 版路径（`~/.qoder-cn` 已支持）
 
 > 本节全部结论遵守当次「暂不落盘」约束产生：本地只读取证 + web 调研，未在取证阶段写任何文件；本节为事后整理补记。
+
+## 9. dsh v4 会话日志（后续增强规格，2026-10-28）
+
+来源：PR #5 作者 Chengxin-Xu 对 #4 中 dsh 账本实现的评审意见（已获实证校验）。当前 dsh 源读 `cost-meter/ledger.json`（日级聚合，已结束日 × 会话 × 路由模型）；若需要**逐次调用粒度与实时速率**，应改读/增读 v4 会话日志，规格如下。
+
+### 9.1 数据源
+
+`$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）下的 `session.v4.jsonl.zstd` / `session.v4.jsonl`。v4 记录含 session id、cwd、模型、时间与 usage：可在新记录落盘后更新当天统计，有有效起止时间时可计算调用速率。日级账本保留为**历史 fallback**（见 9.4 互斥规则）。
+
+### 9.2 计数语义（v4 实测口径）
+
+- 同一 attempt 的多条 usage **取最后一次报告值，不累加**；`llm/retry-started` 开始新 attempt
+- 需覆盖 `assistant/message` 与 `assistant/attempt` 中的 usage，包括 stream 内的 usage chunk
+- 排除 seeded session 的继承历史，避免复制/分支后重复计数
+- 缓存口径：**input 已排除缓存**，cache read/write 分列；**reasoning 包含在 output 中**（与其他源「独立计数」不同——接入时不得把 reasoning 加回 output，否则双计）
+
+### 9.3 Paseo 会话关联
+
+对经插件持久化的 DSH provider，Paseo 的 session id 可能是 `plugin:` 封装：校验封装版本并提取 `data.sessionId` 后与日志中的 native session id 匹配，使 Paseo 管理的会话归到对应 Agent；终端直跑、无对应 Agent 的会话保留「未关联」但照常计入总量。
+
+### 9.4 账本与日志的互斥/补缺规则
+
+- 二者**不可相加**：账本仅作为 v4 日志缺失日期范围的历史 fallback，需明确到日期/会话/模型的覆盖边界，避免同一用量同时来自两路
+- 压缩与未压缩日志同时存在时只选一份
+- 必测场景：重启恢复、部分写入、retry、继承历史去重
+- 压缩日志：异步、有大小上限地解码，只推进完整帧游标；未变化文件不重复解压；缺少 zstd 能力或遇到未知格式时在 coverage 中声明
+
+### 9.5 已修复的账本边界（同评审发现）
+
+`parseDshLedger` 原以「账本最新一天」为进行中日（`dates.at(-1)`）：间歇使用时最后活跃日会被永久跳过（文件不再变化即不触发重读）。已改为**按日历判定**——仅当键等于当天（本地或 UTC 任一历法）才视为进行中；并在跨日历变化时强制重读未变化的账本（`state.day` 水位，重读由 seen index 幂等去重）。提交见分支 `omp-token-source`。

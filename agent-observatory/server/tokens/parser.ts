@@ -365,20 +365,29 @@ export function parseClineDoc(content: string, file: LogFile, sink: CallSink): b
 
 /**
  * dsh (2.18), one call per session per provider-model of every closed day in its cost ledger (`ledger.json`, a whole
- * JSON document rewritten in place): the running day (the latest date) is still moving and waits; closed days are
- * final, so the seen index keeps the re-reads from counting them twice. The route key is the model
- * (`route:model`, e.g. `dsh:deepseek-v4`). No per-call timestamps and no working directory — at is the session's own
- * time and the project column stays empty.
+ * JSON document rewritten in place): today's key is still moving and waits, but only by the calendar — a day strictly
+ * before today is final even when it is the ledger's newest entry (intermittent use never rewrites it), so the seen
+ * index, not the position, keeps the re-reads from counting days twice. The route key is the model (`route:model`,
+ * e.g. `dsh:deepseek-v4`). No per-call timestamps and no working directory — at is the session's own time and the
+ * project column stays empty.
  */
+/** dsh writes its day keys on this device: a day is open under the local or the UTC calendar until that calendar moves on. */
+export function dshToday(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+/** Local and UTC day combined: either calendar rolling over re-reads the ledger even when the file never changed. */
+export const dshDayStamp = (): string => `${dshToday()}T${new Date().toISOString().slice(0, 10)}`;
+
 export function parseDshLedger(content: string, file: LogFile, sink: CallSink): boolean {
   let document: ObjectValue;
   try { document = object(JSON.parse(content)); } catch { return false; }
   const days = object(document.days);
   const state = file.state;
   const dates = Object.keys(days).sort();
-  const openDay = dates.at(-1);
+  const todayLocal = dshToday(), todayUtc = new Date().toISOString().slice(0, 10);
+  const last = dates.at(-1);
   for (const date of dates) {
-    if (date === openDay) continue; // the running day is still moving
+    if (date === last && (date === todayLocal || date === todayUtc)) continue; // today's key is still moving
     const baseAt = stamp(date);
     if (baseAt === null) continue;
     const daySessions = object(days[date]).sessions;
@@ -398,6 +407,7 @@ export function parseDshLedger(content: string, file: LogFile, sink: CallSink): 
       }
     }
   }
+  state.day = dshDayStamp();
   return true;
 }
 
