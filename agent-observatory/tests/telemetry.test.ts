@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { TelemetryStore, type TelemetryObservation } from "../server/telemetry";
-import { eventLabel, mergeTelemetry, telemetryResponseSchema, telemetrySnapshotSchema } from "../shared/telemetry";
+import { eventLabel, hiddenEventCount, mergeTelemetry, telemetryResponseSchema, telemetrySnapshotSchema, type TelemetryEvent } from "../shared/telemetry";
 
 const epoch = Date.parse("2026-09-16T12:00:00.000Z");
 const agent = { id: "agent-1", title: "Ship dashboard" };
@@ -639,4 +639,21 @@ test("storage notices are whole Chinese sentences: saving failed, or what was sa
     assert.match(snapshot.persistenceError ?? "", /统计数据无法读取.*会话事件历史保留不变/);
     assert.equal(snapshot.agents.length, 1);
   } finally { await store.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("hiddenEventCount only counts events inside the window and never goes negative", () => {
+  const event = (id: string, at: string): TelemetryEvent =>
+    ({ id, agentId: "a", agentTitle: "x", at, type: "turn_started", label: "开始一轮", localized: true });
+  const since = Date.parse("2026-09-16T10:00:00.000Z");
+  const retained = [
+    event("in-1", "2026-09-16T10:30:00.000Z"), event("in-2", "2026-09-16T11:00:00.000Z"),
+    event("out-1", "2026-09-16T08:00:00.000Z"),
+  ];
+  // Nothing shown: both in-window events count; the out-of-window one does not.
+  assert.equal(hiddenEventCount(retained, [], since), 2);
+  // Shown events subtract only within the window.
+  assert.equal(hiddenEventCount(retained, [retained[0]!], since), 1);
+  assert.equal(hiddenEventCount(retained, [retained[0]!, retained[1]!], since), 0);
+  // A stray shown event outside the retained set clamps at zero instead of lying.
+  assert.equal(hiddenEventCount(retained, [retained[0]!, retained[1]!, event("extra", "2026-09-16T11:30:00.000Z")], since), 0);
 });

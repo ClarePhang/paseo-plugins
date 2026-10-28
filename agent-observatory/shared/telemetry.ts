@@ -109,6 +109,13 @@ export function eventLabel(event: Pick<TelemetryEvent, "type" | "label" | "local
   }
 }
 
+/** Events the server retains inside the window that the current scope filters hide — the 事件页 hint's count. */
+export function hiddenEventCount(retained: readonly TelemetryEvent[], shown: readonly TelemetryEvent[], sinceMs: number): number {
+  let windowed = 0;
+  for (const event of retained) if (Date.parse(event.at) >= sinceMs) windowed++;
+  return Math.max(0, windowed - shown.length);
+}
+
 /** Client cache update: deltas replace changed summaries and prepend new events, trimmed to the server's retained count. */
 export function mergeTelemetry(previous: TelemetryState | undefined, response: TelemetryResponse | TelemetrySnapshot): TelemetryState {
   if (!("mode" in response)) return response;

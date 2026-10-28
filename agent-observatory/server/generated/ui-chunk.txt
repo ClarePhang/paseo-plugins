@@ -2246,6 +2246,127 @@ function groupDashboardRows(rows, attention) {
   return [...sections.values()].filter((section) => section.rows.length > 0);
 }
 
+// shared/telemetry.ts
+var import_plugin7 = require("@getpaseo/plugin");
+var import_zod7 = require("zod");
+var changeRequestSchema = import_zod7.z.object({ url: import_zod7.z.string().max(2e3).regex(/^https?:\/\//), label: import_zod7.z.string().max(40), kind: import_zod7.z.enum(["mr", "pr"]) });
+var agentTelemetrySchema = import_zod7.z.object({
+  agentId: import_zod7.z.string().min(1).max(256),
+  turnStartedAt: import_zod7.z.iso.datetime().nullable(),
+  turnEndedAt: import_zod7.z.iso.datetime().nullable(),
+  outcome: import_zod7.z.enum(["completed", "failed", "canceled"]).nullable(),
+  completedTurns: import_zod7.z.number().int().nonnegative(),
+  failedTurns: import_zod7.z.number().int().nonnegative(),
+  canceledTurns: import_zod7.z.number().int().nonnegative(),
+  totalRunMs: import_zod7.z.number().nonnegative(),
+  permissionWaitMs: import_zod7.z.number().nonnegative(),
+  /** The latest turn's final reply: when it was written and whether it hands the next step to the user (待回复). Never its text. */
+  replyAt: import_zod7.z.iso.datetime().nullable().optional(),
+  replyAsks: import_zod7.z.boolean().nullable().optional(),
+  /** What that reply invites (快捷回复, opus-B26), its category only; cleared with `replyAsks` by the next turn. */
+  replyNudge: import_zod7.z.enum(REPLY_NUDGES).nullable().optional(),
+  /** The user message (its time) a backfill already read the reply for, so each turn's tail is fetched at most once. */
+  replyFor: import_zod7.z.iso.datetime().nullable().optional(),
+  /**
+   * Why the latest turn stopped when that is not simply done (usage limit with its reset, empty, unfinished). Never text.
+   * `resetGuessed`: the notice named no time zone, so the reset is read in the devices' (grok-F2). `closedMidTurn`: the host
+   * closed the Agent while the turn was open, which raises no attention of its own. `seenAt`: 知道了 here (opus-F34).
+   */
+  stop: import_zod7.z.object({
+    kind: import_zod7.z.enum(["quota", "silent", "unfinished"]),
+    resetAt: import_zod7.z.iso.datetime().nullable(),
+    resetGuessed: import_zod7.z.boolean().optional(),
+    at: import_zod7.z.iso.datetime(),
+    closedMidTurn: import_zod7.z.boolean().optional(),
+    seenAt: import_zod7.z.iso.datetime().nullable().optional()
+  }).nullable().optional(),
+  /** The latest merge or pull request a final reply linked to (opus-B16): its URL and `!12` / `#34`, never the reply. */
+  link: changeRequestSchema.nullable().optional()
+});
+var telemetryEventSchema = import_zod7.z.object({
+  id: import_zod7.z.string().min(1).max(128),
+  agentId: import_zod7.z.string().min(1).max(256),
+  agentTitle: import_zod7.z.string().max(160),
+  at: import_zod7.z.iso.datetime(),
+  type: import_zod7.z.enum([
+    "created",
+    "turn_started",
+    "turn_completed",
+    "turn_failed",
+    "turn_canceled",
+    "permission_requested",
+    "permission_resolved",
+    "archived"
+  ]),
+  label: import_zod7.z.string().max(160),
+  /** Generated lifecycle text is rendered by stable type; old freeform labels remain untouched. */
+  localized: import_zod7.z.boolean().optional(),
+  permissionAllowed: import_zod7.z.boolean().optional(),
+  durationMs: import_zod7.z.number().nonnegative().optional()
+});
+var telemetrySnapshotSchema = import_zod7.z.object({
+  startedAt: import_zod7.z.iso.datetime(),
+  persistenceError: import_zod7.z.string().nullable(),
+  agents: import_zod7.z.array(agentTelemetrySchema).max(2e3),
+  events: import_zod7.z.array(telemetryEventSchema).max(500)
+});
+var revision5 = import_zod7.z.string().min(1).max(80);
+var telemetryResponseSchema = import_zod7.z.discriminatedUnion("mode", [
+  telemetrySnapshotSchema.extend({ mode: import_zod7.z.literal("full"), unchanged: import_zod7.z.literal(false), revision: revision5 }),
+  // `eventCount` is how many events the server retains in this scope; the client trims to it after merging.
+  telemetrySnapshotSchema.extend({ mode: import_zod7.z.literal("delta"), unchanged: import_zod7.z.literal(false), revision: revision5, eventCount: import_zod7.z.number().int().nonnegative().max(500) }),
+  import_zod7.z.object({ mode: import_zod7.z.literal("unchanged"), unchanged: import_zod7.z.literal(true), revision: revision5 })
+]);
+var getTelemetry = (0, import_plugin7.defineRpc)({
+  name: "observatory.telemetry.get",
+  input: import_zod7.z.object({ agentId: import_zod7.z.string().min(1).max(256).optional(), revision: revision5.optional() }),
+  output: telemetryResponseSchema
+});
+function eventLabel(event) {
+  const historical = /* @__PURE__ */ new Set(["\u65B0\u5EFA Agent", "\u5F00\u59CB\u4E00\u8F6E", "\u5B8C\u6210\u4E00\u8F6E", "\u4E00\u8F6E\u5931\u8D25", "\u4E00\u8F6E\u88AB\u53D6\u6D88", "\u7B49\u4F60\u5BA1\u6279\u6216\u56DE\u7B54", "\u8BF7\u6C42\u5DF2\u6279\u51C6", "\u8BF7\u6C42\u88AB\u62D2\u7EDD\u6216\u64A4\u9500", "\u5DF2\u5F52\u6863"]);
+  if (!event.localized && /[\u3400-\u9fff]/.test(event.label) && !historical.has(event.label)) return event.label;
+  switch (event.type) {
+    case "created":
+      return t2("sharedTelemetry.m001");
+    case "turn_started":
+      return t2("sharedTelemetry.m002");
+    case "turn_completed":
+      return t2("sharedTelemetry.m003");
+    case "turn_failed":
+      return t2("sharedTelemetry.m004");
+    case "turn_canceled":
+      return t2("sharedTelemetry.m005");
+    case "permission_requested":
+      return t2("sharedTelemetry.m006");
+    case "permission_resolved":
+      return event.permissionAllowed === false || event.permissionAllowed === void 0 && /declined|denied|cleared|拒绝|取消|撤销/i.test(event.label) ? t2("sharedTelemetry.m007") : t2("sharedTelemetry.m008");
+    // i18n-ignore: Match original Chinese provider/user text; this is parser data.
+    case "archived":
+      return t2("sharedTelemetry.m009");
+  }
+}
+function hiddenEventCount(retained, shown, sinceMs) {
+  let windowed = 0;
+  for (const event of retained) if (Date.parse(event.at) >= sinceMs) windowed++;
+  return Math.max(0, windowed - shown.length);
+}
+function mergeTelemetry(previous, response) {
+  if (!("mode" in response)) return response;
+  if (response.mode !== "full" && !previous) throw new Error(t2("sharedTelemetry.m010"));
+  if (response.mode === "unchanged") return previous;
+  if (response.mode === "full" || !previous) {
+    const { mode: _mode2, unchanged: _unchanged2, ...snapshot2 } = response;
+    return snapshot2;
+  }
+  const { mode: _mode, unchanged: _unchanged, eventCount, ...snapshot } = response;
+  const agentIds = new Set(snapshot.agents.map((agent) => agent.agentId)), eventIds = new Set(snapshot.events.map((event) => event.id));
+  return {
+    ...snapshot,
+    agents: [...snapshot.agents, ...previous.agents.filter((agent) => !agentIds.has(agent.agentId))],
+    events: [...snapshot.events, ...previous.events.filter((event) => !eventIds.has(event.id))].slice(0, eventCount)
+  };
+}
+
 // shared/time-range.ts
 var DEFAULT_TIME_RANGE = "7d";
 var rangeLabels = { "24h": t2("sharedTimeRange.m001"), "7d": t2("sharedTimeRange.m002"), "30d": t2("sharedTimeRange.m003"), all: t2("sharedTimeRange.m004") };
@@ -2321,71 +2442,71 @@ function decisionSignals(agents, events, now = Date.now()) {
 }
 
 // shared/preferences.ts
-var import_plugin7 = require("@getpaseo/plugin");
-var import_zod7 = require("zod");
-var iso = import_zod7.z.iso.datetime({ offset: true });
-var viewKey = import_zod7.z.string().min(1).max(256);
-var viewPreferencesSchema = import_zod7.z.object({
-  query: import_zod7.z.string().max(1e3),
-  status: import_zod7.z.enum(["all", ...AGENT_STATUSES]),
-  readFilter: import_zod7.z.enum(["all", "unread", "read"]),
-  workspace: import_zod7.z.string().max(512),
-  project: import_zod7.z.string().max(1024),
-  checkout: import_zod7.z.string().max(2048),
-  provider: import_zod7.z.string().max(128),
-  range: import_zod7.z.enum(["24h", "7d", "30d", "all"]),
-  sessionScope: import_zod7.z.enum(["all", "current", "history"]),
-  view: import_zod7.z.enum(["tree", "list"]),
-  sort: import_zod7.z.enum(["attention", "recent"]),
-  expanded: import_zod7.z.array(import_zod7.z.string().min(1).max(256)).max(2e3),
-  scrollOffset: import_zod7.z.number().finite().min(0).max(1e8),
+var import_plugin8 = require("@getpaseo/plugin");
+var import_zod8 = require("zod");
+var iso = import_zod8.z.iso.datetime({ offset: true });
+var viewKey = import_zod8.z.string().min(1).max(256);
+var viewPreferencesSchema = import_zod8.z.object({
+  query: import_zod8.z.string().max(1e3),
+  status: import_zod8.z.enum(["all", ...AGENT_STATUSES]),
+  readFilter: import_zod8.z.enum(["all", "unread", "read"]),
+  workspace: import_zod8.z.string().max(512),
+  project: import_zod8.z.string().max(1024),
+  checkout: import_zod8.z.string().max(2048),
+  provider: import_zod8.z.string().max(128),
+  range: import_zod8.z.enum(["24h", "7d", "30d", "all"]),
+  sessionScope: import_zod8.z.enum(["all", "current", "history"]),
+  view: import_zod8.z.enum(["tree", "list"]),
+  sort: import_zod8.z.enum(["attention", "recent"]),
+  expanded: import_zod8.z.array(import_zod8.z.string().min(1).max(256)).max(2e3),
+  scrollOffset: import_zod8.z.number().finite().min(0).max(1e8),
   // 2.2 quick scope「需要处理」. Optional so views stored by older versions still parse; older servers strip it.
-  focus: import_zod7.z.enum(["all", "attention"]).optional()
+  focus: import_zod8.z.enum(["all", "attention"]).optional()
 });
-var savedViewSchema = import_zod7.z.object({
-  id: import_zod7.z.string().min(1).max(128),
-  name: import_zod7.z.string().trim().min(1).max(80),
+var savedViewSchema = import_zod8.z.object({
+  id: import_zod8.z.string().min(1).max(128),
+  name: import_zod8.z.string().trim().min(1).max(80),
   createdAt: iso,
   updatedAt: iso,
   view: viewPreferencesSchema
 });
-var completionSnoozeSchema = import_zod7.z.object({
-  agentId: import_zod7.z.string().min(1).max(256),
+var completionSnoozeSchema = import_zod8.z.object({
+  agentId: import_zod8.z.string().min(1).max(256),
   completionAt: iso,
   until: iso
 });
-var observatorySettingsSchema = import_zod7.z.object({
+var observatorySettingsSchema = import_zod8.z.object({
   /** 「子 Agent 完成计入需要处理」: off by default, the parent has the result already. */
-  childCompletions: import_zod7.z.boolean()
+  childCompletions: import_zod8.z.boolean()
 });
 var defaultObservatorySettings = { childCompletions: false };
-var preferencesSnapshotSchema = import_zod7.z.object({
-  revision: import_zod7.z.number().int().nonnegative(),
+var preferencesSnapshotSchema = import_zod8.z.object({
+  revision: import_zod8.z.number().int().nonnegative(),
   view: viewPreferencesSchema,
-  savedViews: import_zod7.z.array(savedViewSchema).max(12),
-  snoozes: import_zod7.z.array(completionSnoozeSchema).max(2e3),
-  error: import_zod7.z.string().nullable(),
+  savedViews: import_zod8.z.array(savedViewSchema).max(12),
+  snoozes: import_zod8.z.array(completionSnoozeSchema).max(2e3),
+  error: import_zod8.z.string().nullable(),
   // Optional so a reply from an older server still parses.
   settings: observatorySettingsSchema.optional()
 });
-var getPreferences = (0, import_plugin7.defineRpc)({
+var getPreferences = (0, import_plugin8.defineRpc)({
   name: "observatory.preferences.get",
-  input: import_zod7.z.object({ viewKey }),
+  input: import_zod8.z.object({ viewKey }),
   output: preferencesSnapshotSchema
 });
-var updatePreferences = (0, import_plugin7.defineRpc)({
+var updatePreferences = (0, import_plugin8.defineRpc)({
   name: "observatory.preferences.update",
-  input: import_zod7.z.object({
+  input: import_zod8.z.object({
     viewKey,
-    expectedRevision: import_zod7.z.number().int().nonnegative(),
+    expectedRevision: import_zod8.z.number().int().nonnegative(),
     view: viewPreferencesSchema.partial().optional(),
-    saveView: import_zod7.z.object({ id: import_zod7.z.string().min(1).max(128).optional(), name: import_zod7.z.string().trim().min(1).max(80), view: viewPreferencesSchema }).optional(),
-    deleteSavedViewId: import_zod7.z.string().min(1).max(128).optional(),
+    saveView: import_zod8.z.object({ id: import_zod8.z.string().min(1).max(128).optional(), name: import_zod8.z.string().trim().min(1).max(80), view: viewPreferencesSchema }).optional(),
+    deleteSavedViewId: import_zod8.z.string().min(1).max(128).optional(),
     snooze: completionSnoozeSchema.optional(),
-    unsnooze: import_zod7.z.object({ agentId: import_zod7.z.string().min(1).max(256), completionAt: iso }).optional(),
+    unsnooze: import_zod8.z.object({ agentId: import_zod8.z.string().min(1).max(256), completionAt: iso }).optional(),
     settings: observatorySettingsSchema.partial().optional()
   }),
-  output: preferencesSnapshotSchema.extend({ status: import_zod7.z.enum(["updated", "conflict"]) })
+  output: preferencesSnapshotSchema.extend({ status: import_zod8.z.enum(["updated", "conflict"]) })
 });
 function snoozeToken(agent) {
   if (agent.status === "idle" && !agent.archivedAt && agent.requiresAttention === true && agent.attentionReason === "finished") {
@@ -2859,124 +2980,6 @@ function useObservatory({ includeArchived }) {
 // client/use-telemetry.ts
 var import_client4 = require("@getpaseo/plugin/client");
 var import_react_query2 = require("@tanstack/react-query");
-
-// shared/telemetry.ts
-var import_plugin8 = require("@getpaseo/plugin");
-var import_zod8 = require("zod");
-var changeRequestSchema = import_zod8.z.object({ url: import_zod8.z.string().max(2e3).regex(/^https?:\/\//), label: import_zod8.z.string().max(40), kind: import_zod8.z.enum(["mr", "pr"]) });
-var agentTelemetrySchema = import_zod8.z.object({
-  agentId: import_zod8.z.string().min(1).max(256),
-  turnStartedAt: import_zod8.z.iso.datetime().nullable(),
-  turnEndedAt: import_zod8.z.iso.datetime().nullable(),
-  outcome: import_zod8.z.enum(["completed", "failed", "canceled"]).nullable(),
-  completedTurns: import_zod8.z.number().int().nonnegative(),
-  failedTurns: import_zod8.z.number().int().nonnegative(),
-  canceledTurns: import_zod8.z.number().int().nonnegative(),
-  totalRunMs: import_zod8.z.number().nonnegative(),
-  permissionWaitMs: import_zod8.z.number().nonnegative(),
-  /** The latest turn's final reply: when it was written and whether it hands the next step to the user (待回复). Never its text. */
-  replyAt: import_zod8.z.iso.datetime().nullable().optional(),
-  replyAsks: import_zod8.z.boolean().nullable().optional(),
-  /** What that reply invites (快捷回复, opus-B26), its category only; cleared with `replyAsks` by the next turn. */
-  replyNudge: import_zod8.z.enum(REPLY_NUDGES).nullable().optional(),
-  /** The user message (its time) a backfill already read the reply for, so each turn's tail is fetched at most once. */
-  replyFor: import_zod8.z.iso.datetime().nullable().optional(),
-  /**
-   * Why the latest turn stopped when that is not simply done (usage limit with its reset, empty, unfinished). Never text.
-   * `resetGuessed`: the notice named no time zone, so the reset is read in the devices' (grok-F2). `closedMidTurn`: the host
-   * closed the Agent while the turn was open, which raises no attention of its own. `seenAt`: 知道了 here (opus-F34).
-   */
-  stop: import_zod8.z.object({
-    kind: import_zod8.z.enum(["quota", "silent", "unfinished"]),
-    resetAt: import_zod8.z.iso.datetime().nullable(),
-    resetGuessed: import_zod8.z.boolean().optional(),
-    at: import_zod8.z.iso.datetime(),
-    closedMidTurn: import_zod8.z.boolean().optional(),
-    seenAt: import_zod8.z.iso.datetime().nullable().optional()
-  }).nullable().optional(),
-  /** The latest merge or pull request a final reply linked to (opus-B16): its URL and `!12` / `#34`, never the reply. */
-  link: changeRequestSchema.nullable().optional()
-});
-var telemetryEventSchema = import_zod8.z.object({
-  id: import_zod8.z.string().min(1).max(128),
-  agentId: import_zod8.z.string().min(1).max(256),
-  agentTitle: import_zod8.z.string().max(160),
-  at: import_zod8.z.iso.datetime(),
-  type: import_zod8.z.enum([
-    "created",
-    "turn_started",
-    "turn_completed",
-    "turn_failed",
-    "turn_canceled",
-    "permission_requested",
-    "permission_resolved",
-    "archived"
-  ]),
-  label: import_zod8.z.string().max(160),
-  /** Generated lifecycle text is rendered by stable type; old freeform labels remain untouched. */
-  localized: import_zod8.z.boolean().optional(),
-  permissionAllowed: import_zod8.z.boolean().optional(),
-  durationMs: import_zod8.z.number().nonnegative().optional()
-});
-var telemetrySnapshotSchema = import_zod8.z.object({
-  startedAt: import_zod8.z.iso.datetime(),
-  persistenceError: import_zod8.z.string().nullable(),
-  agents: import_zod8.z.array(agentTelemetrySchema).max(2e3),
-  events: import_zod8.z.array(telemetryEventSchema).max(500)
-});
-var revision5 = import_zod8.z.string().min(1).max(80);
-var telemetryResponseSchema = import_zod8.z.discriminatedUnion("mode", [
-  telemetrySnapshotSchema.extend({ mode: import_zod8.z.literal("full"), unchanged: import_zod8.z.literal(false), revision: revision5 }),
-  // `eventCount` is how many events the server retains in this scope; the client trims to it after merging.
-  telemetrySnapshotSchema.extend({ mode: import_zod8.z.literal("delta"), unchanged: import_zod8.z.literal(false), revision: revision5, eventCount: import_zod8.z.number().int().nonnegative().max(500) }),
-  import_zod8.z.object({ mode: import_zod8.z.literal("unchanged"), unchanged: import_zod8.z.literal(true), revision: revision5 })
-]);
-var getTelemetry = (0, import_plugin8.defineRpc)({
-  name: "observatory.telemetry.get",
-  input: import_zod8.z.object({ agentId: import_zod8.z.string().min(1).max(256).optional(), revision: revision5.optional() }),
-  output: telemetryResponseSchema
-});
-function eventLabel(event) {
-  const historical = /* @__PURE__ */ new Set(["\u65B0\u5EFA Agent", "\u5F00\u59CB\u4E00\u8F6E", "\u5B8C\u6210\u4E00\u8F6E", "\u4E00\u8F6E\u5931\u8D25", "\u4E00\u8F6E\u88AB\u53D6\u6D88", "\u7B49\u4F60\u5BA1\u6279\u6216\u56DE\u7B54", "\u8BF7\u6C42\u5DF2\u6279\u51C6", "\u8BF7\u6C42\u88AB\u62D2\u7EDD\u6216\u64A4\u9500", "\u5DF2\u5F52\u6863"]);
-  if (!event.localized && /[\u3400-\u9fff]/.test(event.label) && !historical.has(event.label)) return event.label;
-  switch (event.type) {
-    case "created":
-      return t2("sharedTelemetry.m001");
-    case "turn_started":
-      return t2("sharedTelemetry.m002");
-    case "turn_completed":
-      return t2("sharedTelemetry.m003");
-    case "turn_failed":
-      return t2("sharedTelemetry.m004");
-    case "turn_canceled":
-      return t2("sharedTelemetry.m005");
-    case "permission_requested":
-      return t2("sharedTelemetry.m006");
-    case "permission_resolved":
-      return event.permissionAllowed === false || event.permissionAllowed === void 0 && /declined|denied|cleared|拒绝|取消|撤销/i.test(event.label) ? t2("sharedTelemetry.m007") : t2("sharedTelemetry.m008");
-    // i18n-ignore: Match original Chinese provider/user text; this is parser data.
-    case "archived":
-      return t2("sharedTelemetry.m009");
-  }
-}
-function mergeTelemetry(previous, response) {
-  if (!("mode" in response)) return response;
-  if (response.mode !== "full" && !previous) throw new Error(t2("sharedTelemetry.m010"));
-  if (response.mode === "unchanged") return previous;
-  if (response.mode === "full" || !previous) {
-    const { mode: _mode2, unchanged: _unchanged2, ...snapshot2 } = response;
-    return snapshot2;
-  }
-  const { mode: _mode, unchanged: _unchanged, eventCount, ...snapshot } = response;
-  const agentIds = new Set(snapshot.agents.map((agent) => agent.agentId)), eventIds = new Set(snapshot.events.map((event) => event.id));
-  return {
-    ...snapshot,
-    agents: [...snapshot.agents, ...previous.agents.filter((agent) => !agentIds.has(agent.agentId))],
-    events: [...snapshot.events, ...previous.events.filter((event) => !eventIds.has(event.id))].slice(0, eventCount)
-  };
-}
-
-// client/use-telemetry.ts
 var telemetryQueryKey = (hostId) => ["agent-observatory", hostId, "telemetry"];
 function useTelemetry(hostId) {
   const rpc = (0, import_client4.useRpc)(getTelemetry), cache = (0, import_react_query2.useQueryClient)(), active = useForeground();
@@ -16642,6 +16645,13 @@ function DashboardView({ theme, layout, host: host4, navigation, workspaceId, in
   const scopeIds = (0, import_react50.useMemo)(() => new Set(scoped.filter((agent) => matchesAgentStatus(agent, status) && (readFilter === "all" || completionReadState(agent) === readFilter) && (focus === "all" || attentionOf(agent))).map((a) => a.id)), [scoped, status, readFilter, focus, attentionOf]);
   const eventSince = range === "all" ? -Infinity : filterNow - (range === "24h" ? 1 : range === "7d" ? 7 : 30) * 864e5;
   const events = (0, import_react50.useMemo)(() => (telemetry?.events ?? []).filter((event) => scopeIds.has(event.agentId) && Date.parse(event.at) >= eventSince), [telemetry, scopeIds, eventSince]);
+  const hiddenEvents = (0, import_react50.useMemo)(() => hiddenEventCount(telemetry?.events ?? [], events, eventSince), [telemetry, events, eventSince]);
+  const clearScope = (0, import_react50.useCallback)(() => {
+    setStatus("all");
+    setReadFilter("all");
+    setFocus("all");
+    setSessionScope("all");
+  }, []);
   const signals = (0, import_react50.useMemo)(() => {
     const labels = /* @__PURE__ */ new Map();
     for (const signal of decisionSignals(agents, telemetry?.events ?? [], now)) {
@@ -17002,6 +17012,16 @@ function DashboardView({ theme, layout, host: host4, navigation, workspaceId, in
         /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(Button, { theme, size: "sm", variant: "danger", icon: "Archive", label: t2("coreDashboard.confirmArchive", { value1: archiveMarks.size }), busy: archivingMarked, onPress: () => void archiveMarked() })
       ] }) : null,
       sessionsTab ? /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(SplitView, { theme, compact, showDetail: false, list: sessionList, detail }) : tab === "activity" ? /* @__PURE__ */ (0, import_jsx_runtime45.jsxs)(import_jsx_runtime45.Fragment, { children: [
+        hiddenEvents ? /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(import_react_native84.View, { style: { paddingHorizontal: space.md, paddingTop: space.md }, children: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(
+          Banner,
+          {
+            theme,
+            tone: "neutral",
+            icon: "Filter",
+            message: t2("coreDashboard.hiddenByFilters", { value1: hiddenEvents }),
+            action: { label: t2("coreDashboard.clearFilters"), onPress: clearScope }
+          }
+        ) }) : null,
         !compact && events.length ? /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(Swimlane, { theme, events, agents, now, compact: false, onSelect: selectAgent, inset: space.lg }) : null,
         /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(SplitView, { theme, compact, showDetail: false, list: /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(ActivityFeed, { events, theme, telemetry, onSelect: selectAgent, now, selectedId, agents, swimlane: compact }), detail })
       ] }) : tab === "board" ? /* @__PURE__ */ (0, import_jsx_runtime45.jsx)(

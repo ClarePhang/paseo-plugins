@@ -509,6 +509,7 @@
     "newApprovalsIssuesAndUnreadResultsAppear": "New approvals, issues, and unread results appear here",
     "noMatchingSessions": "No matching sessions",
     "clearFilters": "Clear filters",
+    "hiddenByFilters": "{value1} events hidden by the current filters",
     "noArchivedSessionsInThisTimeRange": "No archived sessions in this time range",
     "viewAllTime": "View all time",
     "noSessionsYet": "No sessions yet",
