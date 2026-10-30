@@ -1782,8 +1782,8 @@
     "theUnreadResultReminderIsSnoozed": "The unread result reminder is snoozed",
     "idle": "Idle",
     "theAgentStoppedButNoResult": "The agent stopped, but no result was recorded for this turn",
-    "closed": "Closed",
-    "theSessionIsClosed": "The session is closed",
+    "closed": "Not loaded",
+    "theSessionIsClosed": "The session isn't loaded (Paseo releases idle ones); sending a message resumes it",
     "canceled": "Canceled",
     "thisTurnWasCanceled": "This turn was canceled",
     "runningFor": "Running for ",
@@ -1810,7 +1810,11 @@
     "resultRead": "Result read",
     "askingYou": "Asking you · {value1}",
     "askingYou2": "Asking you",
-    "noResultRecordedForThisTurn": "No result recorded for this turn"
+    "noResultRecordedForThisTurn": "No result recorded for this turn",
+    "looping": "Looping",
+    "stuck": "Maybe stuck",
+    "loopingHint": "Still running, but its latest tool calls keep repeating without progress",
+    "stuckHint": "Still running, but nothing new for a long while"
   },
   "secondaryStopCard": {
     "inAboutMinutes": {
@@ -2127,7 +2131,7 @@
     "idle": "Idle",
     "error": "Error",
     "starting": "Starting",
-    "closed": "Closed",
+    "closed": "Not loaded",
     "canceled": "Canceled",
     "question": "Question",
     "planNeedsApproval": "Plan needs approval",
@@ -2716,7 +2720,23 @@
     "m024": "Asking you, awaiting your reply",
     "m025": "Completed: {value1}",
     "m026": "A new result awaits your review",
-    "m027": "The local live-information cache expired. Reloading."
+    "m027": "The local live-information cache expired. Reloading.",
+    "loopSame": {
+      "one": "Going in circles: {tool} returned the same result {count} time",
+      "other": "Going in circles: {tool} returned the same result {count} times in a row"
+    },
+    "loopPingpong": "Going in circles: the last {count} calls alternate between two",
+    "loopRotation": "Going in circles: the last {count} calls rotate among a few",
+    "loopContract": "Going in circles: {tool} failed with the same argument error 3 times",
+    "loopSomeTool": "the same tool",
+    "stuckIdle": {
+      "one": "May be stuck: nothing new for {minutes} minute",
+      "other": "May be stuck: nothing new for {minutes} minutes"
+    },
+    "stuckTool": {
+      "one": "May be stuck: {tool} has run for {minutes} minute",
+      "other": "May be stuck: {tool} has run for {minutes} minutes"
+    }
   },
   "sharedBackground": {
     "m001": "The local background-task cache expired. Reloading."
@@ -2760,7 +2780,7 @@
     "m008": "Idle",
     "m009": "Error",
     "m010": "Starting",
-    "m011": "Closed",
+    "m011": "Not loaded",
     "m012": "Canceled",
     "m013": "{seconds}s",
     "m014": "{value1}m {value2}s",
@@ -3136,7 +3156,9 @@
     "unread": "Unread",
     "persistFailed": "Cannot save which labels the Observatory added ({reason}), so it adds no labels or pins for now",
     "noAnswer": "Paseo did not answer; the change may have been made",
-    "notSent": "The plugin was busy or reloading; nothing was written"
+    "notSent": "The plugin was busy or reloading; nothing was written",
+    "looping": "Looping",
+    "stuck": "Maybe stuck"
   },
   "alertsSettings": {
     "chimeTitle": "Chime",
@@ -3268,5 +3290,18 @@
   },
   "serverRecap": {
     "helperTitle": "Summary · {title}"
+  },
+  "secondaryIssueCard": {
+    "loopTitle": "Going in circles?",
+    "stuckTitle": "May be stuck",
+    "loopText": "This turn is still running, but its latest tool calls keep repeating. Check what it is doing, and interrupt it or give it a new direction in the session if needed.",
+    "stuckText": "This turn is still running, but nothing new has happened since {time}.",
+    "stuckToolText": "{tool} has been running since {time} without a result.",
+    "recentCalls": "Recent calls",
+    "seen": "Got it",
+    "seenHint": "It stays shown but no longer counts in Needs you",
+    "openSession": "Open session",
+    "seenFailed": "Could not save: {reason}",
+    "since": "since {time}"
   }
 }

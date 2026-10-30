@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AgentTimelineItem, ToolCallDetail } from "./paseo-types";
 import { emptyStatsMetrics, type StatsMetrics, type StatsTool, type ToolKind } from "../shared/stats";
+import { isTurnStart, type TurnStartItem } from "../shared/turn-start";
 
 const MAX_ITEM_LINES = 20_000;
 
@@ -84,7 +85,7 @@ export function extractTurnContent(timeline: readonly AgentTimelineItem[], lastK
   }
   if (start < 0) {
     for (let index = timeline.length - 1; index >= 0; index--) {
-      if (timeline[index].type === "user_message") { start = index; break; }
+      if (isTurnStart(timeline[index] as TurnStartItem)) { start = index; break; }
     }
   }
   // A turn longer than the window read: count what was read rather than nothing.
@@ -98,6 +99,8 @@ export function extractTurnContent(timeline: readonly AgentTimelineItem[], lastK
       case "notification": if (item.level === "error") metrics.errors++; break;
       case "compaction": if (item.status === "completed") metrics.compactions++; break;
       case "tool_call": {
+        // Another agent's message and a schedule's prompt (Paseo 0.14) are tool-call rows that start a turn, not tools.
+        if (isTurnStart(item as TurnStartItem)) break;
         const detail = item.detail, kind = toolKind(detail), name = item.name.trim().slice(0, 160).trim();
         const failed = item.status === "failed" || (detail.type === "shell" && detail.exitCode != null && detail.exitCode !== 0);
         metrics.toolCalls++;

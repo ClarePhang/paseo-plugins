@@ -87,6 +87,29 @@ describe("Claude: the turn's total arrives when it ends", () => {
     expect(await ledger.observe("a5", idle("my-claude", usage(9, 9, 9)), ["foreground-turn-1"])).toBeUndefined();
   });
 
+  it("keeps a turn's figures when its session closes and the next session reuses its id (0.10.0-local.3)", async () => {
+    let generation = 0;
+    const deps: TurnUsageDeps = {
+      base: async (provider) => bases[provider] ?? null,
+      refresh: async () => null,
+      feed: { hold: () => undefined, release: () => undefined },
+      turnName: (_agentId, turnId) => (generation === 0 ? turnId : `${turnId}#${generation}`),
+    };
+    const ledger = createTurnUsage(deps);
+    await ledger.turnStarted("a9", "my-claude", "foreground-turn-1");
+    await ledger.observe("a9", running("my-claude", "foreground-turn-1", usage(1, 1, 1)), ["foreground-turn-1"]);
+    expect(await ledger.observe("a9", idle("my-claude", usage(6, 7, 8)), ["foreground-turn-1"])).toEqual([{ id: "foreground-turn-1", i: 6, c: 7, o: 8 }]);
+    // Paseo 0.14 released the session after an hour idle; a new message loaded it again.
+    ledger.closed("a9");
+    generation = 1;
+    await ledger.turnStarted("a9", "my-claude", "foreground-turn-1");
+    await ledger.observe("a9", running("my-claude", "foreground-turn-1", usage(6, 7, 8)), ["foreground-turn-1", "foreground-turn-1#1"]);
+    expect(await ledger.observe("a9", idle("my-claude", usage(10, 20, 30)), ["foreground-turn-1", "foreground-turn-1#1"])).toEqual([
+      { id: "foreground-turn-1", i: 6, c: 7, o: 8 },
+      { id: "foreground-turn-1#1", i: 10, c: 20, o: 30 },
+    ]);
+  });
+
   it("shows nothing for a turn nobody watched while it ran (replayed history included)", async () => {
     const { usage: ledger } = setup();
     await ledger.turnStarted("a4", "my-claude", "t1");
@@ -195,6 +218,33 @@ describe("Codex: each request's usage is added up", () => {
     ledger.feedUpdate(upsert("c6", "t1", usage(20, 0, 2)));
     ledger.feedUpdate({ kind: "remove", agentId: "c6" });
     expect(await ledger.observe("c6", idle("work-codex"), ["t1"])).toBeUndefined();
+  });
+
+  it("ends a counted turn when the session closes, and counts the next session's turn under its own name", async () => {
+    let generation = 0;
+    const feed = { holds: 0, hold: () => void (feed.holds += 1), release: () => void (feed.holds -= 1) };
+    const ledger = createTurnUsage({
+      base: async (provider) => bases[provider] ?? null,
+      refresh: async () => ({ lastUsage: usage(100, 0, 10) }),
+      feed,
+      turnName: (_agentId, turnId) => (generation === 0 ? turnId : `${turnId}#${generation}`),
+    });
+    await ledger.turnStarted("c9", "work-codex", "codex-turn-1");
+    ledger.feedUpdate(upsert("c9", "codex-turn-1", usage(300, 100, 20)));
+    await ledger.observe("c9", running("work-codex", "codex-turn-1", usage(300, 100, 20)), ["codex-turn-1"]);
+    ledger.closed("c9");
+    expect(feed.holds).toBe(0);
+    generation = 1;
+    await ledger.turnStarted("c9", "work-codex", "codex-turn-1");
+    // The subscription and the hooks carry the session's own ids.
+    ledger.feedUpdate(upsert("c9", "codex-turn-1", usage(500, 200, 40)));
+    expect(await ledger.observe("c9", running("work-codex", "codex-turn-1", usage(500, 200, 40)), ["codex-turn-1", "codex-turn-1#1"])).toEqual([
+      { id: "codex-turn-1#1", i: 300, c: 200, o: 40, live: true },
+      { id: "codex-turn-1", i: 200, c: 100, o: 20 },
+    ]);
+    ledger.turnEnded("c9", "codex-turn-1");
+    expect(ledger.debug("c9")?.current?.ending).toBe(true);
+    ledger.dispose();
   });
 
   it("holds the subscription only while a Codex turn runs, and lets go when an Agent is forgotten", async () => {

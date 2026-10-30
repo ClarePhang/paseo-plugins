@@ -159,3 +159,12 @@ test("a suggested reply is something you would send as it is: short, in your wor
     "Fix it. Test it. Ship it.", "do", "这句话实在是太长了我觉得没有人会这样打字发给编码助手吧真的是太长太长了这样不行的啊啊啊啊啊啊啊啊", "one two three four five six seven eight nine ten eleven twelve thirteen"])
     assert.equal(suggestedReply(no), null, String(no));
 });
+
+test("a schedule's prompt or another agent's message opens its own exchange (Paseo 0.14 records them as tool calls)", () => {
+  const heartbeat = { type: "tool_call", callId: "paseo-system:3f2a", name: "heartbeat", status: "completed", error: null, detail: { type: "plain_text", text: "Schedule \"nightly\" fired.\n检查构建" } } as unknown as AgentTimelineItem;
+  const message = { type: "tool_call", callId: "paseo-agent-message:m1", name: "agent_message", status: "completed", error: null, detail: { type: "plain_text", text: "子任务做完了" }, agentMessage: { event: "finished", sender: { id: "c" }, text: "子任务做完了" } } as unknown as AgentTimelineItem;
+  const exchanges = collectExchanges([user("开始"), assistant("好的。"), heartbeat, tool("ok"), assistant("构建是绿的。"), message, assistant("已收到。")]);
+  assert.deepEqual(exchanges, [{ user: "开始", assistant: "好的。" }, { user: "Schedule \"nightly\" fired.\n检查构建", assistant: "构建是绿的。" }, { user: "子任务做完了", assistant: "已收到。" }]);
+  // A tool merely named "heartbeat" opens nothing.
+  assert.deepEqual(collectExchanges([user("开始"), { ...(heartbeat as object), callId: "toolu_1" } as AgentTimelineItem, assistant("好")]), [{ user: "开始", assistant: "好" }]);
+});

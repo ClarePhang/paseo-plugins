@@ -37,27 +37,29 @@ function host(){
   } as unknown as BrowserManager;
   return {server,rpc,events,before,manager,restored,frames,directories,retired,orphanCalls,unretired,inputs};
 }
-const openRequest={agentId:'agent-1',workspaceId:'one',provider:'claude',cwd:'/work/one',reason:'resume',purpose:'interactive',env:{}};
+const createdAgent={agent:{id:'agent-1',workspaceId:'one'}};
 
-test('agent session open returns at once, even while the workspace listing hangs or fails',async()=>{
+test('agent lifecycle events start restoration at once, even while the workspace listing hangs or fails',async()=>{
   const {server,before,events,manager,restored,directories}=host();
   let listCalls=0;const pending:{resolve:(value:unknown)=>void;reject:(error:Error)=>void}[]=[];
   const paseo={workspaces:{list:()=>{listCalls++;return new Promise((resolve,reject)=>{pending.push({resolve,reject});});}}};
   const cleanup=contribute(server,{manager});
-  const open=before.get('agent.session_open')!,turn=events.get('agent.turn_started')!;
-  assert.equal(open({request:openRequest},{paseo,signal:new AbortController().signal}),undefined,'the request is left unchanged without waiting');
+  // Paseo 0.14 reopens every open Agent session after a plugin with a session-open hook starts, stops or reloads.
+  assert.equal(before.has('agent.session_open'),false,'no session-open hook');
+  const created=events.get('agent.created')!,turn=events.get('agent.turn_started')!;
+  assert.equal(created(createdAgent,{paseo,signal:new AbortController().signal}),undefined,'returns without waiting');
   assert.equal(turn({agent:{id:'agent-1'},turnId:null},{paseo,signal:new AbortController().signal}),undefined);
   assert.equal(listCalls,1,'hooks share one restoration listing');
   pending[0].reject(new Error('daemon API reconnecting'));
   await tick();
   // A failed listing is retried by the next lifecycle event and never reaches the daemon as a hook failure.
-  assert.equal(open({request:openRequest},{paseo,signal:new AbortController().signal}),undefined);
+  assert.equal(created(createdAgent,{paseo,signal:new AbortController().signal}),undefined);
   assert.equal(listCalls,2);
   pending[1].resolve({entries:[workspace('one'),workspace('two')],pageInfo:{hasMore:false}});
   await tick();await tick();
   assert.deepEqual(restored,[['one','two']]);
   assert.deepEqual(directories,[['one','/work/one'],['two','/work/two']],'restoration tells the manager each workspace directory for upload checks');
-  open({request:openRequest},{paseo,signal:new AbortController().signal});
+  turn({agent:{id:'agent-1'},turnId:null},{paseo,signal:new AbortController().signal});
   assert.equal(listCalls,2,'restoration runs once per plugin process');
   await (cleanup as ()=>Promise<void>)();
 });

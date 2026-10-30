@@ -139,7 +139,9 @@ test("configured Paseo report runs without Grok and records resolved runner plus
     const queued = await f.manager.start(fake.api, "target"); const done = await waitReport(f.manager, queued.id);
     assert.equal(done.model, "m"); assert.equal(done.runner?.label, "Reader"); assert.equal(done.runner?.modeId, "auto");
     assert.equal(done.runner?.sessionAgentId, "analysis-1"); assert.equal(done.usage?.costUsd, 0.4); assert.equal(fake.archives(), 1);
-    assert.equal(fake.creations[0].parent, "target"); assert.equal(fake.creations[0].config.provider, "codex-fake/m");
+    // Made in the parent's workspace with the sub-agent label (0.13 escapes a `parent` create's first message).
+    assert.equal(fake.creations[0].workspaceId, "workspace"); assert.equal(fake.creations[0].labels["paseo.parent-agent-id"], "target");
+    assert.equal(fake.creations[0].parent, undefined); assert.equal(fake.creations[0].config.provider, "codex-fake/m");
     assert.equal(fake.creations[0].config.modeId, "auto"); assert.deepEqual(fake.creations[0].config.options, { sandbox_mode: "read-only", approval_policy: "never" });
     assert.equal((await f.manager.list()).runnerLabel, "Reader"); assert.equal((await f.manager.list()).available, true);
   } finally { await f.close(); }

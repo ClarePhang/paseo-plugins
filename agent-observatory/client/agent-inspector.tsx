@@ -43,13 +43,29 @@ export function AgentInspector({ theme, layout, host: target, navigation, agentI
   const telemetry = useTelemetry(hostId), receipts = useReadReceipts(), background = useBackground(hostId, live);
   const extras = useLiveExtras(hostId, live && (source?.status === "running" || source?.requiresAttention === true));
   const heartbeats = useHeartbeats(hostId, !!source);
+  // Its Paseo sub-agents (2.18), so a parent whose sub-agents still work is held here as on the full page (direct ones only,
+  // every page up to 1,000).
+  const children = useQuery({ queryKey: ["agent-observatory", hostId, "inspector-children", agentId],
+    queryFn: async () => {
+      const entries: Array<{ agent: unknown }> = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 10; page++) {
+        const result: { entries: Array<{ agent: unknown }>; pageInfo?: { hasMore?: boolean; nextCursor?: string | null } } = await paseo.agents.list({ filter: { includeArchived: false, labels: { "paseo.parent-agent-id": agentId } }, page: { limit: 100, ...(cursor ? { cursor } : {}) } });
+        entries.push(...result.entries);
+        cursor = result.pageInfo?.hasMore ? result.pageInfo.nextCursor ?? null : null;
+        if (!cursor) break;
+      }
+      return entries;
+    },
+    enabled: foreground && live, staleTime: 5000, refetchOnWindowFocus: false, retry: 1, refetchInterval: foreground ? 15_000 : false });
   const agent = useMemo(() => {
     if (!source) return null;
     const base = normalizeAgent(source, { project: (snapshot.data as { project?: AgentProjectPlacement | null } | undefined)?.project ?? null });
-    const [enriched] = applyLiveExtras(enrichAgents([base], telemetry.data, background.data), extras.data?.agents);
+    const kids = (children.data ?? []).map(entry => normalizeAgent(entry.agent as unknown as AgentSource)).filter(child => child.parentAgentId === agentId && child.id !== agentId && child.labels["observatory.role"] !== "insight");
+    const [enriched] = applyLiveExtras(enrichAgents([base, ...kids], telemetry.data, background.data), extras.data?.agents);
     const origin = receipts.data?.archiveOrigins.find(item => item.agentId === agentId), receipt = receipts.data?.receipts.find(item => item.agentId === agentId);
     return applyReadReceipt(applyArchiveReadOrigin(enriched!, origin), receipt);
-  }, [source, snapshot.data, telemetry.data, background.data, extras.data, receipts.data, agentId]);
+  }, [source, snapshot.data, children.data, telemetry.data, background.data, extras.data, receipts.data, agentId]);
   const actions: MenuAction[] = onOpenOverview ? [{ key: "overview", label: t("coreAgentInspector.viewInObservatory"), icon: "Orbit", hint: t("coreAgentInspector.openTheFullSessionListWithThis"), onPress: () => onOpenOverview(agentId) }] : [];
   return <View onLayout={onLayout} style={{ flex: 1, minHeight: 0, backgroundColor: theme.colors.surface0 }}>
     {agent ? <AgentDetail key={`${hostId}:${agent.id}`} hostId={hostId} agent={agent} theme={theme} compact={compact} navigation={navigation} onSelectAgent={setAgentId}

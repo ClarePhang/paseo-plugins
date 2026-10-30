@@ -21,6 +21,8 @@ const LABELS: Record<AttentionPhase, { id: MessageId; color: LabelColor }> = {
   quota: { id: "alertsLabels.quota", color: "orange" },
   silent: { id: "alertsLabels.silent", color: "amber" },
   unfinished: { id: "alertsLabels.unfinished", color: "amber" },
+  looping: { id: "alertsLabels.looping", color: "orange" },
+  stuck: { id: "alertsLabels.stuck", color: "amber" },
   idle: { id: "alertsLabels.idle", color: "violet" },
   unread: { id: "alertsLabels.unread", color: "pink" },
 };

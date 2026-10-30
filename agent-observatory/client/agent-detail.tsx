@@ -38,6 +38,7 @@ import { RecordedRunResult, ScheduleRunCard } from "./schedule-run-card";
 import { heartbeatsQueryKey, useScheduleRun } from "./use-schedules";
 import { HeartbeatCard } from "./heartbeat-card";
 import { StopCard } from "./stop-card";
+import { IssueCard } from "./issue-card";
 import { useRestoreSession } from "./use-restore";
 import type { ScheduleFocus } from "./schedule-focus";
 import { describeRunError, knownRunError } from "../shared/schedules";
@@ -66,8 +67,11 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
   const [tab, setTab] = useState<DetailTab>(initialEvidenceRef ? "timeline" : "result"), [focusRef, setFocusRef] = useState<string | null>(initialEvidenceRef ?? null), [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => { if (initialEvidenceRef) { setFocusRef(initialEvidenceRef); setTab("timeline"); } }, [initialEvidenceRef]);
   const paseo = usePaseo(), memory = useMemo(() => readingMemory(paseo, `detail:${agent.id}`), [paseo, agent.id]);
-  const timeline = useTimeline({ agentId: agent.id }, tab === "timeline");
-  const digest = useDigest(agent.id, tab === "digest", ownTurnRunning(agent));
+  // A closed Agent (not loaded) is read once, not polled: each read loads it again, and Paseo 0.14 closes an idle Agent
+  // after an hour, so a poll would keep loading and releasing it (a provider process each time for ACP and Codex).
+  const closed = agent.rawStatus === "closed";
+  const timeline = useTimeline({ agentId: agent.id }, tab === "timeline", !closed);
+  const digest = useDigest(agent.id, tab === "digest", ownTurnRunning(agent), closed);
   const getResult = useRpc(getAgentResult), fetchEvidence = useRpc(getSessionEvidence), markRead = useRpc(markCompletionRead), queryCache = useQueryClient();
   const foreground = useForeground(), invalidateAttention = useInvalidateAttention();
   // This Agent's ledger (shared with its quick replies by query key): its scheduled messages show above the result.
@@ -91,7 +95,7 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
   const result = useQuery({ queryKey: resultKey, queryFn: async () => { const previous = queryCache.getQueryData<AgentResultState>(resultKey); return mergeAgentResult(previous, await getResult({ agentId: agent.id, expectedLastUserMessageAt: agent.lastUserMessageAt, expectedAttentionTimestamp: agent.attentionTimestamp ?? null, ...(previous?.revision ? { revision: previous.revision } : {}) })); }, enabled: tab === "result" && foreground && !waitForTap, staleTime: 2000,
     // A schedule Agent whose session failed to read shows its recorded reply instead; it retries only when asked.
     // A running turn's reply grows slowly and the directory already says when the turn ends (the key changes then): 15 s is enough (opus-F8).
-    refetchInterval: query => !foreground || tab !== "result" || (scheduleRunId && query.state.status === "error") ? false : ownTurnRunning(agent) ? 15000 : 30000, retry: 1 });
+    refetchInterval: query => !foreground || tab !== "result" || closed || (scheduleRunId && query.state.status === "error") ? false : ownTurnRunning(agent) ? 15000 : 30000, retry: 1 });
   const pendingDetails = useQuery({ queryKey: ["observatory-pending", agent.id], queryFn: () => paseo.agents.ref(agent.id).refresh(), enabled: agent.pendingPermissionCount > 0 && foreground, refetchInterval: agent.pendingPermissionCount > 0 && foreground ? 10000 : false, staleTime: 3000, retry: 1 });
   const evidence = useQuery({ queryKey: ["observatory-session-evidence", agent.id], queryFn: () => fetchEvidence({ agentId: agent.id }), enabled: tab === "diagnostics", staleTime: 60000, retry: 1 });
   const [ownReadReceipt, setOwnReadReceipt] = useState<ReadReceipt | null>(null), [reading, setReading] = useState(false), [archiving, setArchiving] = useState(false);
@@ -231,7 +235,9 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
     <PaneLabel theme={theme} icon="AlarmClock" tone="sky">{t("alertsSchedule.detailTitle")}</PaneLabel>
     <DeferredList theme={theme} queue={deferredQueue} only={isScheduledView} />
   </View> : null;
-  const lead = scheduleCard || stopCard || heartbeatCard || scheduledCard ? <View style={{ gap: space.md }}>{stopCard}{scheduledCard}{scheduleCard}{heartbeatCard}</View> : null;
+  // 原地打转 / 可能卡住 of the running turn (2.18) leads: it is what needs a look right now.
+  const issueCard = agent.issue && agent.status === "running" ? <IssueCard theme={theme} agent={agent} hostId={hostId} onOpenConversation={navigation ? openConversation : undefined} /> : null;
+  const lead = issueCard || scheduleCard || stopCard || heartbeatCard || scheduledCard ? <View style={{ gap: space.md }}>{issueCard}{stopCard}{scheduledCard}{scheduleCard}{heartbeatCard}</View> : null;
   // A schedule Agent whose session cannot be read (an ACP session cannot be resumed, the log is gone) still has the reply its run recorded.
   const recordedFallback = !!scheduleRunId && !recordedFirst && !!result.error && !result.data;
   const body = tab === "result" ? waitForTap ? <RecordedRunResult theme={theme} runId={scheduleRunId!} header={scrolled} lead={lead} inset={inset} onLoadFull={() => setFullResult(true)} />

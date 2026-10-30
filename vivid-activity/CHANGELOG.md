@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0 (2026-10-28)
+
+- **A sub-agent that waits for you or failed says so**: the live activity card of a sub-agent shows "Waiting for you" or "Asking you" in amber (with a breathing dot) and a line saying to open its chat; a sub-agent that stopped with an error shows the first line of the error in red (at most 150 characters, common token shapes masked first: `sk-`, `ghp_` and friends, `glpat-`, `xox?-`, JWTs, and values after `Bearer`, `token=`, `api_key=`). Read from the pending requests and error Paseo already reports, with no extra session reads; older servers send neither and the card is unchanged.
+
 ## 0.9.1 (2026-10-25)
 
 - **Paseo 0.13 support** (0.12 keeps working):

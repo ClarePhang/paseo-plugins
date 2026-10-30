@@ -11,14 +11,17 @@ import { isUnreadCompletion, stopShown, timestamp, waitingKind, type AgentRecord
 import type { ReplyNudge } from "./reply";
 import { ATTENTION_PHASES } from "./attention-phases";
 import type { AttentionEntry } from "./attention-rpc";
+import type { LiveIssue } from "./live-issue";
 
 /** What kind of attention an Agent needs (or `null`: none to show). */
-export type AttentionPhase = "approval" | "question" | "plan" | "error" | "quota" | "silent" | "unfinished" | "idle" | "unread";
+export type AttentionPhase = "approval" | "question" | "plan" | "error" | "quota" | "silent" | "unfinished" | "looping" | "stuck" | "idle" | "unread";
 export { ATTENTION_PHASES };
 
 export function attentionPhase(agent: AgentRecord): AttentionPhase | null {
   const waiting = waitingKind(agent);
   if (waiting) return waiting;
+  // A running turn going in circles, or quiet for long (2.18): shown while it runs, counted until 知道了.
+  if (agent.status === "running" && agent.issue) return agent.issue.kind;
   // A usage limit outranks the turn's outcome; a closed session shows the turn the host cut off (opus-F34).
   if (stopShown(agent)) return agent.stop!.kind;
   if (agent.status === "error") return "error";
@@ -26,7 +29,7 @@ export function attentionPhase(agent: AgentRecord): AttentionPhase | null {
   return isUnreadCompletion(agent) ? "unread" : null;
 }
 /** Every state a session row, the detail and the legend show (client/status.tsx gives each its colour, glyph and label). */
-export type SessionPhase = "approval" | "question" | "plan" | "error" | "quota" | "silent" | "unfinished" | "running" | "starting" | "unread" | "snoozed" | "done" | "idle" | "quiet" | "closed" | "canceled";
+export type SessionPhase = "approval" | "question" | "plan" | "error" | "quota" | "silent" | "unfinished" | "looping" | "stuck" | "running" | "starting" | "unread" | "snoozed" | "done" | "idle" | "quiet" | "closed" | "canceled";
 /**
  * The phase a session shows, by the rules 需要处理 counts with: why the turn stopped (`stopShown`) outranks how it ended (a
  * usage limit outranks a failure too), and a closed session shows the turn the host cut off. A stop cannot be put off:
@@ -37,7 +40,7 @@ export function sessionPhase(agent: AgentRecord, snoozed = false): SessionPhase 
   if (waiting) return waiting;
   if (stopShown(agent)) return agent.stop!.kind;
   if (agent.status === "error") return "error";
-  if (agent.status === "running") return "running";
+  if (agent.status === "running") return agent.issue?.kind ?? "running";
   if (agent.status === "initializing") return "starting";
   if (agent.status === "completed") return isUnreadCompletion(agent) ? snoozed ? "snoozed" : "unread" : "done";
   return agent.status === "canceled" ? "canceled" : agent.status === "closed" ? "closed" : agent.status === "idle" ? "idle" : "quiet";
@@ -45,7 +48,7 @@ export function sessionPhase(agent: AgentRecord, snoozed = false): SessionPhase 
 /** Failures and usage limits: the badge turns red while any waits. */
 export const loudPhases: ReadonlySet<AttentionPhase> = new Set<AttentionPhase>(["error", "quota"]);
 /** Blocking requests first, then failures and stops, then results and questions to read. */
-export const phaseRank: Record<AttentionPhase, number> = { approval: 0, question: 0, plan: 0, error: 1, quota: 1, silent: 2, unfinished: 2, idle: 3, unread: 3 };
+export const phaseRank: Record<AttentionPhase, number> = { approval: 0, question: 0, plan: 0, error: 1, quota: 1, silent: 2, unfinished: 2, looping: 2, stuck: 2, idle: 3, unread: 3 };
 
 export interface ReasonInput {
   phase: AttentionPhase;
@@ -54,6 +57,7 @@ export interface ReasonInput {
   stop?: Pick<ObservedStop, "kind" | "resetAt" | "resetGuessed" | "closedMidTurn"> | null;
   lastError?: string | null;
   note?: string | null;
+  issue?: Pick<LiveIssue, "pattern" | "tool" | "count" | "toolRunning" | "since"> | null;
 }
 export interface ReasonLine { text: string; hue: "amber" | "violet" | "red" | "orange" | "pink"; icon: string }
 
@@ -91,13 +95,28 @@ export function reasonText(input: ReasonInput, now = Date.now()): ReasonLine {
     case "error": return { text: t("sharedAttention.m018", { value1: firstLine(input.lastError) ?? t("sharedAttention.m019") }), hue: "red", icon: "CircleX" };
     case "silent": return { text: t("sharedAttention.m020"), hue: "amber", icon: "CircleDashed" };
     case "unfinished": return { text: input.stop?.closedMidTurn ? t("sharedAttention.m021") : t("sharedAttention.m022"), hue: "amber", icon: "CircleDotDashed" };
+    case "looping": return { text: loopText(input.issue), hue: "orange", icon: "Repeat" };
+    case "stuck": {
+      const minutes = Math.max(1, Math.floor((now - (timestamp(input.issue?.since) ?? now)) / 60_000));
+      return { text: input.issue?.toolRunning && input.issue.tool ? t("sharedAttention.stuckTool", { tool: input.issue.tool, minutes }) : t("sharedAttention.stuckIdle", { minutes }), hue: "amber", icon: "Hourglass" };
+    }
     case "idle": return { text: input.note ? t("sharedAttention.m023", { value1: input.note }) : t("sharedAttention.m024"), hue: "violet", icon: "MessageCircleMore" };
     case "unread": return { text: input.note ? t("sharedAttention.m025", { value1: input.note }) : t("sharedAttention.m026"), hue: "pink", icon: "Mail" };
   }
 }
+/** What a loop looks like, in one line: 「Read a.ts 连续 6 次结果相同」 and the like. */
+export function loopText(issue: Pick<LiveIssue, "pattern" | "tool" | "count"> | null | undefined): string {
+  const tool = issue?.tool ?? t("sharedAttention.loopSomeTool"), count = issue?.count ?? 0;
+  switch (issue?.pattern) {
+    case "pingpong": return t("sharedAttention.loopPingpong", { count });
+    case "rotation": return t("sharedAttention.loopRotation", { count });
+    case "contract": return t("sharedAttention.loopContract", { tool });
+    default: return t("sharedAttention.loopSame", { tool, count });
+  }
+}
 export function reasonLine(agent: AgentRecord, now = Date.now()): ReasonLine | null {
   const phase = attentionPhase(agent);
-  return phase ? reasonText({ phase, pending: agent.pending, pendingCount: agent.pendingPermissionCount, stop: agent.stop, lastError: agent.lastError, note: agent.note }, now) : null;
+  return phase ? reasonText({ phase, pending: agent.pending, pendingCount: agent.pendingPermissionCount, stop: agent.stop, lastError: agent.lastError, note: agent.note, issue: agent.issue ?? null }, now) : null;
 }
 
 /**
@@ -106,6 +125,7 @@ export function reasonLine(agent: AgentRecord, now = Date.now()): ReasonLine | n
  */
 export function waitingSince(agent: AgentRecord, phase = attentionPhase(agent)): string | null {
   const order = phase === "unread" ? [agent.completionAt, agent.attentionTimestamp, agent.lastActivityAt]
+    : phase === "looping" || phase === "stuck" ? [agent.issue?.since, agent.lastActivityAt]
     : phase === "quota" || phase === "silent" || phase === "unfinished" ? [agent.stop?.at, agent.completionAt, agent.lastActivityAt]
     : [agent.lastActivityAt, agent.attentionTimestamp];
   return order.find((value): value is string => timestamp(value) !== null) ?? null;
@@ -125,6 +145,7 @@ export function entryOf(agent: AgentRecord, phase: AttentionPhase): AttentionEnt
     pendingCount: agent.pendingPermissionCount,
     stop: agent.stop ? { kind: agent.stop.kind, resetAt: agent.stop.resetAt, resetGuessed: agent.stop.resetGuessed === true, closedMidTurn: agent.stop.closedMidTurn === true } : null,
     lastError: firstLine(agent.lastError, 200), note: agent.note?.slice(0, 200) ?? null,
+    issue: (phase === "looping" || phase === "stuck") && agent.issue ? { kind: agent.issue.kind, pattern: agent.issue.pattern, tool: agent.issue.tool?.slice(0, 120) ?? null, count: agent.issue.count, toolRunning: agent.issue.toolRunning, since: agent.issue.since } : null,
     nudge, ask: nudge ? agent.replyAsk?.slice(0, 320) ?? null : null, promptAt: prompt === null ? null : new Date(prompt).toISOString(),
     roundAt: round === null ? null : new Date(round).toISOString() };
 }
@@ -161,11 +182,18 @@ export function threadAttention(node: Pick<AgentTreeNode, "children">, attention
  * Live extras of loaded Agents (memory only, never stored): the running turn's todo progress, the host's latest note, and the
  * closing sentence the latest reply's 快捷回复 answer (`ask`, redacted, from the turn's end).
  */
+export const liveIssueSchema = z.object({
+  kind: z.enum(["looping", "stuck"]), key: z.string().min(1).max(300), since: z.iso.datetime(),
+  pattern: z.enum(["same", "pingpong", "rotation", "contract"]).nullable(), tool: z.string().max(160).nullable(),
+  count: z.number().int().nonnegative(), toolRunning: z.boolean(), evidence: z.array(z.string().max(200)).max(8), seen: z.boolean(),
+});
 const extraSchema = z.object({
   agentId: id,
   todo: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative(), current: z.string().max(80).nullable(), at: z.iso.datetime() }).nullable(),
   note: z.string().max(200).nullable(), noteAt: z.iso.datetime().nullable(),
   ask: z.string().max(320).nullable().default(null), askAt: z.iso.datetime().nullable().default(null),
+  /** 原地打转 / 可能卡住 of the running turn (2.18); older servers send none. */
+  issue: liveIssueSchema.nullable().default(null),
 });
 export type LiveExtra = z.infer<typeof extraSchema>;
 export const getLiveExtras = defineRpc({
@@ -174,6 +202,12 @@ export const getLiveExtras = defineRpc({
   output: z.discriminatedUnion("mode", [z.object({ mode: z.literal("full"), unchanged: z.literal(false), revision, agents: z.array(extraSchema).max(500) }), z.object({ mode: z.literal("unchanged"), unchanged: z.literal(true), revision })]),
 });
 export type LiveExtrasResponse = z.infer<typeof getLiveExtras.output>;
+/** 知道了 on 原地打转 / 可能卡住 (2.18): `ok` false when that exact issue is no longer there (a newer one or none). */
+export const seeLiveIssue = defineRpc({
+  name: "observatory.live.issue.seen",
+  input: z.object({ agentId: id, key: z.string().min(1).max(300) }),
+  output: z.object({ ok: z.boolean() }),
+});
 export interface LiveExtrasState { agents: LiveExtra[]; revision: string }
 export function mergeLiveExtras(previous: LiveExtrasState | undefined, response: LiveExtrasResponse): LiveExtrasState {
   if (response.mode === "full") return { agents: response.agents, revision: response.revision };
@@ -194,6 +228,8 @@ export function applyLiveExtras(agents: AgentRecord[], extras: readonly z.input<
     const note = extra.note && (timestamp(extra.noteAt) ?? 0) >= prompt ? extra.note : null;
     const todo = extra.todo && agent.status === "running" ? extra.todo : null;
     const ask = extra.ask && (timestamp(extra.askAt) ?? 0) >= prompt ? extra.ask : null;
-    return note || todo || ask ? { ...agent, ...(note ? { note } : {}), ...(todo ? { todo } : {}), ...(ask ? { replyAsk: ask } : {}) } : agent;
+    // Only about the turn that is running now: a finished turn's loop is history.
+    const issue = extra.issue && agent.status === "running" && (timestamp(extra.issue.since) ?? 0) >= (timestamp(agent.activeTurnStartedAt) ?? 0) - 1000 ? extra.issue : null;
+    return note || todo || ask || issue ? { ...agent, ...(note ? { note } : {}), ...(todo ? { todo } : {}), ...(ask ? { replyAsk: ask } : {}), ...(issue ? { issue } : {}) } : agent;
   });
 }

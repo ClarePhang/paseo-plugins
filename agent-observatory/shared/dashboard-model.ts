@@ -90,6 +90,8 @@ export interface AttentionOptions {
 export function needsAttention(agent: AgentRecord, snoozed = false, options: AttentionOptions = {}): boolean {
   if (agent.archivedAt) return false;
   if (agent.pendingPermissionCount > 0 || agent.status === "waiting") return true;
+  // A running turn going in circles or quiet for long counts until 知道了 (a subagent's too: nobody else watches it).
+  if (agent.status === "running" && agent.issue) return !agent.issue.seen;
   // A stop decides on its own, before the subagent setting (a child's parent may not have stopped) and never snoozed.
   if (stopShown(agent)) return stopUnseen(agent);
   if (agent.status === "error") return agent.requiresAttention !== false;

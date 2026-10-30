@@ -277,3 +277,18 @@ test("a missed end read from the timeline tail", () => {
   assert.equal(tailStop([prompt, row(2, { type: "assistant_message", text: "好了" }, "2026-10-11T03:03:00Z")], userAt, now), null);
   assert.equal(tailStop([row(5, { type: "tool_call", name: "Edit" }, "2026-10-11T03:02:00Z")], userAt, now), null, "the tail does not reach the prompt: unknown");
 });
+
+test("a schedule's prompt or another agent's message starts the turn (Paseo 0.14 records them as tool calls)", () => {
+  const user = { type: "user_message", text: "检查一下" } as const, reply = { type: "assistant_message", text: "都好。" } as const;
+  const heartbeat = { type: "tool_call", name: "heartbeat", callId: "paseo-system:3f2a", status: "completed", detail: { type: "plain_text", text: "Schedule \"nightly\" fired.\n看看有没有新任务" } } as const;
+  const shell = { type: "tool_call", name: "Bash", callId: "toolu_1", status: "completed", detail: { type: "shell", command: "ls" } } as const;
+  // A heartbeat with nothing to do answers nothing by design; the earlier turn's reply is not this turn's.
+  assert.equal(turnStop({ outcome: "completed", items: [user, reply, heartbeat] as never, now }), null);
+  assert.deepEqual(turnStop({ outcome: "completed", items: [user, reply, heartbeat, shell] as never, now }), { kind: "unfinished", resetAt: null, at: new Date(now).toISOString() });
+  assert.equal(turnStop({ outcome: "completed", items: [user, reply, heartbeat, shell, reply] as never, now }), null);
+  // Another agent's message that got no answer at all is silent, like a user message.
+  const message = { type: "tool_call", name: "agent_message", callId: "paseo-agent-message:m1", status: "completed", agentMessage: { event: "finished", sender: { id: "child" }, text: "做完了" }, detail: { type: "plain_text", text: "做完了" } } as const;
+  assert.deepEqual(turnStop({ outcome: "completed", items: [user, reply, message] as never, now }), { kind: "silent", resetAt: null, at: new Date(now).toISOString() });
+  // A tool that is merely named "heartbeat" is a step of the user's turn.
+  assert.deepEqual(turnStop({ outcome: "completed", items: [user, { ...heartbeat, callId: "toolu_2" }] as never, now }), { kind: "unfinished", resetAt: null, at: new Date(now).toISOString() });
+});

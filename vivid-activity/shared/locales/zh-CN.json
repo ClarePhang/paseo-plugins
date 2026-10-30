@@ -698,7 +698,12 @@
     "scoreSuffix": " · {score}%",
     "numberedStep": "{number}. {title}",
     "childOnHost": "在 {host} 上运行",
-    "childHostOffline": "现在连不上 {host}，读不到这个子 Agent 的动态；连上后会自动再读。"
+    "childHostOffline": "现在连不上 {host}，读不到这个子 Agent 的动态；连上后会自动再读。",
+    "childWaitsApproval": "等你批准",
+    "childAsks": "在问你",
+    "childWaitsApprovalNote": "子 Agent 在等你批准一个操作，打开它的对话处理。",
+    "childAsksNote": "子 Agent 有问题要问你，打开它的对话回答。",
+    "childFailedNote": "子 Agent 出错停下了：{error}"
   },
   "settings": {
     "savedSettings": "已保存的设置",

@@ -6,6 +6,7 @@ import { object, string, type TimelineRow } from "../../shared/timeline";
 import { extractTurnContent } from "../turn-content";
 import { analyzeCommand } from "./commands";
 import { excerpt, type CompactRow, type FoldState, type ToolFact, type TurnFact } from "./model";
+import { isTurnStart, turnStartText, type TurnStartItem } from "../../shared/turn-start";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 function filePath(path: string, cwd: string): string {
@@ -23,6 +24,9 @@ export function compactRow(row: TimelineRow, cwd: string, projected = row.seqSta
     const text = string(item.text);
     fact.text = `${/^\s/u.test(text) ? " " : ""}${excerpt(text, 242)}${/\s$/u.test(text) ? " " : ""}`;
     fact.messageId = string(item.messageId) || row.providerMessageId;
+  } else if (type === "tool_call" && isTurnStart(item as TurnStartItem)) {
+    // Another agent's message or a schedule's prompt opens a turn like a user message; it is no tool.
+    fact.trigger = true; fact.text = excerpt(turnStartText(item as TurnStartItem), 242);
   } else if (type === "error" || type === "notification" && item.level === "error") {
     fact.type = "error"; fact.text = excerpt(string(item.message), 160);
   } else if (type === "compaction") fact.completed = item.status === "completed";
@@ -97,7 +101,7 @@ export function foldRows(state: FoldState, rows: readonly CompactRow[]): FoldSta
     const known = row.turnId ? state.turnIds.get(row.turnId) : undefined;
     let turn = known === undefined ? undefined : state.turns[known];
     const current = state.turns.at(-1);
-    if (row.type === "user_message") turn = newTurn(state, row);
+    if (row.type === "user_message" || row.trigger) turn = newTurn(state, row);
     if (!turn && row.turnId && current?.turnId === null && current.tail === "user_message") {
       turn = current; turn.turnId = row.turnId; state.turnIds.set(row.turnId, turn.index - 1);
     }
@@ -118,8 +122,8 @@ export function foldRows(state: FoldState, rows: readonly CompactRow[]): FoldSta
       if (tool.lane === "shell" && tool.exitCode != null && tool.exitCode !== 0) tool.status = "failed";
       state.tools.set(key, tool); state.callIds.set(row.tool.id, key);
       if (latest) turn.tail = tool.status;
-    } else if (row.type === "user_message") {
-      turn.prompt = excerpt(row.text ?? "", 200); turn.messages++; turn.tail = row.type;
+    } else if (row.type === "user_message" || row.trigger) {
+      turn.prompt = excerpt(row.text ?? "", 200); turn.messages++; turn.tail = "user_message";
     } else if (row.type === "assistant_message") {
       const continuation = turn.tail === "assistant_message" && turn.replySeq + 1 === row.seq && (!row.messageId || turn.replyId === row.messageId);
       turn.reply = continuation ? `${turn.reply}${row.text ?? ""}`.slice(0, 244) : row.text ?? "";

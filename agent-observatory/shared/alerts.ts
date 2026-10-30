@@ -41,7 +41,7 @@ export function chimeKindOf(phase: AttentionPhase): ChimeKind {
     case "question": return "question";
     case "approval": case "plan": return "approval";
     case "quota": return "quota";
-    case "error": case "silent": case "unfinished": return "error";
+    case "error": case "silent": case "unfinished": case "looping": case "stuck": return "error";
     case "idle": case "unread": return "done";
   }
 }

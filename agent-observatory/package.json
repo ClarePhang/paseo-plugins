@@ -1,7 +1,7 @@
 {
   "name": "agent-observatory",
   "private": true,
-  "version": "2.18.0",
+  "version": "2.18.1",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "tsx --import ./tests/i18n-setup.ts --test tests/*.test.ts",

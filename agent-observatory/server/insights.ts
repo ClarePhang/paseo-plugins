@@ -15,7 +15,7 @@ import { fitInsightReport, InsightStorage, retainInsightJobs, summarizeInsight, 
 import { AUTO_RUNNER_LABEL, BUILTIN_INSIGHT_RUNNER, InsightRunnerRegistry, NO_RUNNER_ERROR, cleanupInsightAgents, grokPlan, runPaseoStructured } from "./insight-runner";
 import { isInsightAgent, isKnownInsightAgent, markInsightAgent } from "./insight-runner-lifecycle";
 import { turnRead } from "./lifecycle-hub";
-import { turnTimeline } from "./turn-timeline";
+import { isTurnStart, turnTimeline } from "./turn-timeline";
 import { getInsightOverview, getInsightSuggestions, startInsightSuggestions, cancelInsightSuggestions, setActionFeedback,
   suggestionReportSchema, type OverviewDays, type SuggestionJob, type ActionFeedback } from "../shared/insight-overview";
 import { buildInsightOverview, getSuggestionTiming, summarizeSuggestion } from "./insight-overview";
@@ -466,15 +466,18 @@ export class InsightManager {
   }
 }
 
-/** User messages and distinct tool calls, the two thresholds of automatic analysis. */
-function conversationCounts(items: readonly { type: string; callId?: unknown }[]): { users: number; tools: number } {
+/**
+ * User messages and distinct tool calls, the two thresholds of automatic analysis. Another agent's message and a schedule's
+ * prompt (Paseo 0.14) are tool-call rows that start a turn, not tools.
+ */
+function conversationCounts(items: readonly { type: string; callId?: unknown; name?: unknown; agentMessage?: unknown }[]): { users: number; tools: number } {
   return { users: items.filter(item => item.type === "user_message").length,
-    tools: new Set(items.filter(item => item.type === "tool_call").map(item => item.callId)).size };
+    tools: new Set(items.filter(item => item.type === "tool_call" && !isTurnStart(item)).map(item => item.callId)).size };
 }
 
 /** Reads back from the end only as far as the thresholds need (at most 1000 rows). */
 async function deeperCounts(paseo: PaseoApi, agentId: string, minTurns: number, minTools: number): Promise<{ users: number; tools: number }> {
-  const read = await turnTimeline(paseo, agentId, [] as { type: string; callId?: unknown }[], {
+  const read = await turnTimeline(paseo, agentId, [] as { type: string; callId?: unknown; name?: unknown; agentMessage?: unknown }[], {
     maxRows: 1000, enough: items => { const counts = conversationCounts(items); return counts.users >= minTurns && counts.tools >= minTools; } });
   return conversationCounts(read.items);
 }

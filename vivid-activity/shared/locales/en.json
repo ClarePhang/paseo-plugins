@@ -773,7 +773,12 @@
     "scoreSuffix": " · {score}%",
     "numberedStep": "{number}. {title}",
     "childOnHost": "Running on {host}",
-    "childHostOffline": "{host} can't be reached right now, so this subagent's activity can't be read. It is read again once the host is back."
+    "childHostOffline": "{host} can't be reached right now, so this subagent's activity can't be read. It is read again once the host is back.",
+    "childWaitsApproval": "Waiting for you",
+    "childAsks": "Asking you",
+    "childWaitsApprovalNote": "The sub-agent is waiting for you to approve something; open its chat to decide.",
+    "childAsksNote": "The sub-agent has a question for you; open its chat to answer.",
+    "childFailedNote": "The sub-agent stopped with an error: {error}"
   },
   "settings": {
     "savedSettings": "Saved settings",

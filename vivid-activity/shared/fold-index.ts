@@ -134,6 +134,9 @@ function disclaimed(item: { name: string; callId?: unknown; status?: unknown; de
   // A report or finish notice from another agent (Paseo 0.13 delivers several together): Paseo's own row says who sent it
   // and why (finished, errored, waiting for approval), which a takeover loses, since the host keeps that part to itself.
   if (item.name === "agent_message" && typeof item.callId === "string" && item.callId.startsWith("paseo-agent-message:")) return "agent-message";
+  // A schedule or heartbeat prompt: Paseo 0.14 records it as this row (0.13 dropped it), and the app starts a turn on it
+  // (turn folding, history paging). Taken over, its turn would merge into the previous one.
+  if (item.name === "heartbeat" && typeof item.callId === "string" && item.callId.startsWith("paseo-system:")) return "heartbeat";
   return pluginCardOf(item);
 }
 
@@ -322,9 +325,15 @@ function resultsForRepeats(entries: readonly unknown[]): Map<string, ComparableR
 
 /**
  * One page of projected entries → wire rows plus the table of their turns. `turnStart` gives the start the server knows
- * for a turn id (null when unknown).
+ * for a turn (null when unknown). `turnOf` names a row's turn from its turn id and when the row was written (a session
+ * loaded again counts its turn ids from the start again, so the server tells those turns apart); the turn id by default.
  */
-export function wirePageFromEntries(entries: readonly unknown[], turnStart: (turnId: string) => number | null, cwd?: string | null): { rows: WireRow[]; turns: WireTurn[] } {
+export function wirePageFromEntries(
+  entries: readonly unknown[],
+  turnStart: (turn: string) => number | null,
+  cwd?: string | null,
+  turnOf: (turnId: string, rowAt: number | null) => string = (turnId) => turnId,
+): { rows: WireRow[]; turns: WireTurn[] } {
   const rows: WireRow[] = [];
   const turns: WireTurn[] = [];
   const index = new Map<string, number>();
@@ -333,12 +342,13 @@ export function wirePageFromEntries(entries: readonly unknown[], turnStart: (tur
     const row = wireRowFromEntry(entry, (callId) => results.get(callId), cwd);
     if (!row) continue;
     const turnId = record(entry).turnId;
-    if (typeof turnId === "string" && turnId && turnId.length <= 200) {
-      let u = index.get(turnId);
+    const turn = typeof turnId === "string" && turnId ? turnOf(turnId, row.at > 0 ? row.at : null) : "";
+    if (turn && turn.length <= 200) {
+      let u = index.get(turn);
       if (u === undefined) {
         u = turns.length;
-        index.set(turnId, u);
-        turns.push({ id: turnId, at: turnStart(turnId) });
+        index.set(turn, u);
+        turns.push({ id: turn, at: turnStart(turn) });
       }
       row.u = u;
     }

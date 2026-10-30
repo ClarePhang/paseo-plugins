@@ -6,6 +6,7 @@ import { t } from "./text";
  * ends (and when a missed end is backfilled); only the kind and the reset time are kept, never the text.
  */
 import { string, type TimelineItem, type TimelineRow } from "./timeline";
+import { isTurnStart, turnStartText } from "./turn-start";
 
 export type StopKind = "quota" | "silent" | "unfinished";
 export interface StopReason {
@@ -210,13 +211,16 @@ const RETRY = /^provider retry\b/i;
 /** A local command (/compact, /clear, /model …) is not answered by design. */
 const LOCAL_COMMAND = /^\/[a-z][\w:-]*(\s|$)/i;
 
-/** The items of the latest turn: everything after the last user message (all items when there is none). */
-function latestTurn(items: readonly TimelineItem[]): { items: readonly TimelineItem[]; prompted: boolean; prompt: string } {
+/**
+ * The items of the latest turn: everything after the row that started it (all items when there is none). A turn starts at
+ * a user message, another agent's message or (Paseo 0.14) a schedule or heartbeat prompt, recorded as tool calls.
+ */
+function latestTurn(items: readonly TimelineItem[]): { items: readonly TimelineItem[]; prompted: boolean; prompt: string; scheduled: boolean } {
   for (let index = items.length - 1; index >= 0; index--) {
     const item = items[index]!;
-    if (item.type === "user_message") return { items: items.slice(index + 1), prompted: true, prompt: string(item.text).trim() };
+    if (isTurnStart(item)) return { items: items.slice(index + 1), prompted: true, prompt: turnStartText(item).trim(), scheduled: item.type === "tool_call" && item.agentMessage == null };
   }
-  return { items, prompted: false, prompt: "" };
+  return { items, prompted: false, prompt: "", scheduled: false };
 }
 
 /**
@@ -250,8 +254,9 @@ export function turnStop(input: { outcome: "completed" | "failed" | "canceled"; 
   // but only as a notice naming the user's own limit (the closing line of a summary about rate-limit work is not one, F6).
   if (reply) return stopFor(quotaNotice(reply, "reply", input.now, input.hostZone) ?? (parts.length > 1 ? quotaNotice(parts.at(-1), "strict", input.now, input.hostZone) : null));
   if (!turn.prompted) return null;
-  // Nothing produced: an empty turn, unless it was a local command or a compaction, which answer nothing by design.
-  if (!turn.items.some(item => OUTPUT.has(item.type))) return LOCAL_COMMAND.test(turn.prompt) || turn.items.some(item => item.type === "compaction") ? null : { kind: "silent", resetAt: null, at };
+  // Nothing produced: an empty turn, unless it was a local command, a compaction or a schedule's prompt (a heartbeat with
+  // nothing to do), which answer nothing by design.
+  if (!turn.items.some(item => OUTPUT.has(item.type))) return LOCAL_COMMAND.test(turn.prompt) || turn.scheduled || turn.items.some(item => item.type === "compaction") ? null : { kind: "silent", resetAt: null, at };
   // Output, but the turn ended on a tool call without a closing message.
   return index >= 0 && turn.items[index]!.type === "tool_call" ? { kind: "unfinished", resetAt: null, at } : null;
 }

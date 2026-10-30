@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.3 - 2026-10-29
+
+- 适配 Paseo 0.14：不再注册 `agent.session_open` 钩子。0.14 起，只要带这个钩子的插件启动、停止、重载或崩溃重启，daemon 就把所有打开着的 Agent 会话标成过期；每个 Agent 下一条消息前都会先关掉再重开会话（Claude Code 等进程重启，后台任务和子 Agent 随之结束）。本插件的钩子只用来提前开始恢复浏览器，现在改在 `agent.created` 和 `agent.turn_started` 时开始；Agent 用浏览器工具时恢复已在进行，MCP 桥照旧等待正在恢复的浏览器。
+- 在隔离的 Paseo 0.14.0 daemon 上对比：重载旧版本插件后，下一条消息让 Agent 重开了会话（脚本化 ACP 进程重启并重新载入会话）；新版本重载后没有任何 Agent 重开。Paseo 0.13 上行为不变。
+
 ## 0.13.2 - 2026-10-25
 
 - 适配 Paseo 0.13：动效浮层（kit motion）改为写明的绝对定位：Paseo 0.13 的手机 App 升到 React Native 0.86，删掉了 `StyleSheet.absoluteFillObject`，原来的写法在手机上会让 Ping / Flash 浮层失去定位、把排版顶开。

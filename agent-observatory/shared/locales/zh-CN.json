@@ -1623,8 +1623,8 @@
     "theUnreadResultReminderIsSnoozed": "未读结果已延后提醒",
     "idle": "空闲",
     "theAgentStoppedButNoResult": "Agent 已停下，这一轮没有记录到结果",
-    "closed": "已关闭",
-    "theSessionIsClosed": "会话已关闭",
+    "closed": "未载入",
+    "theSessionIsClosed": "会话未载入（Paseo 会在空闲后释放），发消息时会自动恢复",
     "canceled": "已取消",
     "thisTurnWasCanceled": "这一轮被取消",
     "runningFor": "已运行 ",
@@ -1645,7 +1645,11 @@
     "resultRead": "结果已读",
     "askingYou": "在问你 · {value1}",
     "askingYou2": "在问你",
-    "noResultRecordedForThisTurn": "没有记录到这一轮的结果"
+    "noResultRecordedForThisTurn": "没有记录到这一轮的结果",
+    "looping": "原地打转",
+    "stuck": "可能卡住",
+    "loopingHint": "还在运行，但最近的工具调用一直在重复，没有进展",
+    "stuckHint": "还在运行，但很久没有新的输出或工具调用"
   },
   "secondaryStopCard": {
     "inAboutMinutes": "约 {count} 分钟后",
@@ -1920,7 +1924,7 @@
     "idle": "空闲",
     "error": "异常",
     "starting": "启动中",
-    "closed": "已关闭",
+    "closed": "未载入",
     "canceled": "已取消",
     "question": "提问",
     "planNeedsApproval": "计划待批",
@@ -2509,7 +2513,14 @@
     "m024": "在问你，等你回复",
     "m025": "完成：{value1}",
     "m026": "新结果等你查看",
-    "m027": "本地实时信息缓存已失效，正在重新读取。"
+    "m027": "本地实时信息缓存已失效，正在重新读取。",
+    "loopSame": "疑似原地打转：{tool} 连续 {count} 次结果都一样",
+    "loopPingpong": "疑似原地打转：最近 {count} 次调用只在两种之间来回",
+    "loopRotation": "疑似原地打转：最近 {count} 次调用只在几种之间轮转",
+    "loopContract": "疑似原地打转：{tool} 连续 3 次参数出错",
+    "loopSomeTool": "同一个工具",
+    "stuckIdle": "可能卡住：{minutes} 分钟没有新动静",
+    "stuckTool": "可能卡住：{tool} 已经跑了 {minutes} 分钟"
   },
   "sharedBackground": {
     "m001": "本地后台任务缓存已失效，正在重新读取。"
@@ -2553,7 +2564,7 @@
     "m008": "空闲",
     "m009": "异常",
     "m010": "启动中",
-    "m011": "已关闭",
+    "m011": "未载入",
     "m012": "已取消",
     "m013": "{seconds}秒",
     "m014": "{value1}分 {value2}秒",
@@ -2917,7 +2928,9 @@
     "unread": "未读",
     "persistFailed": "记不下观测台加过哪些标签（{reason}），先不新增标签和置顶",
     "noAnswer": "Paseo 没有回应，这次写入可能已经生效",
-    "notSent": "插件正忙或正在重载，这次没有写入"
+    "notSent": "插件正忙或正在重载，这次没有写入",
+    "looping": "原地打转",
+    "stuck": "可能卡住"
   },
   "alertsSettings": {
     "chimeTitle": "提示音",
@@ -3046,5 +3059,18 @@
   },
   "serverRecap": {
     "helperTitle": "小结 · {title}"
+  },
+  "secondaryIssueCard": {
+    "loopTitle": "疑似原地打转",
+    "stuckTitle": "可能卡住了",
+    "loopText": "这一轮还在运行，但最近的工具调用一直在重复。看看它在做什么，需要时在会话里打断或给它新的方向。",
+    "stuckText": "这一轮还在运行，但从 {time} 起没有新的输出或工具调用。",
+    "stuckToolText": "{tool} 从 {time} 起一直在跑，还没有结果。",
+    "recentCalls": "最近的调用",
+    "seen": "知道了",
+    "seenHint": "之后仍会显示，但不再计入需要处理",
+    "openSession": "打开会话",
+    "seenFailed": "没能记下：{reason}",
+    "since": "从 {time} 起"
   }
 }

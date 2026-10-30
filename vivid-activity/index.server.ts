@@ -5,7 +5,7 @@ import { getClientChunk } from "./shared/ui-chunk";
 import { handleChildSummary } from "./server/child-summary";
 import { childSummaryRpc } from "./shared/child-summary";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { forgetAgentTurns, handleFoldIndex, noteTurnStarted } from "./server/fold-index.js";
+import { forgetAgentTurns, handleFoldIndex, noteAgentClosed, noteTurnStarted, turnName } from "./server/fold-index.js";
 import { createProviderBases } from "./server/provider-base.js";
 import { handleReadImage } from "./server/read-image.js";
 import { handleTurnPrompt } from "./server/turn-prompt.js";
@@ -37,6 +37,7 @@ export default function contribute(server: PluginServerContext) {
       return (result?.agent as { lastUsage?: unknown } | undefined) ?? null;
     },
     feed,
+    turnName: (agentId, turnId) => turnName(agentId, turnId),
   });
   server.handle(getClientChunk, getUiChunk);
   server.registerSettings(activitySettings);
@@ -60,7 +61,13 @@ export default function contribute(server: PluginServerContext) {
     usage.turnEnded(event.agent.id, event.turnId);
   });
   // 0.5.0：Agent 关闭（归档、删除、从归档恢复、daemon 停止）后丢掉它的轮次开始时间（Paseo 0.11 的 `agent.closed`）。
+  // 0.10.0-local.3：Paseo 0.14 在空闲一小时后也关闭会话，下次发消息再载入；关闭只换一代（之前的轮次还要显示用时和 Token，
+  // 下一个会话重名的轮次换个名字），归档时才丢掉。
   const stopClosed = server.on("agent.closed", (event) => {
+    noteAgentClosed(event.agent.id);
+    usage.closed(event.agent.id);
+  });
+  const stopArchived = server.on("agent.archived", (event) => {
     forgetAgentTurns(event.agent.id);
     usage.forget(event.agent.id);
   });
@@ -69,6 +76,7 @@ export default function contribute(server: PluginServerContext) {
     stopTurns();
     stopEnded();
     stopClosed();
+    stopArchived();
     usage.dispose();
     feed.dispose();
   };

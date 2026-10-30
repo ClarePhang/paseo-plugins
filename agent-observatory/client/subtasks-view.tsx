@@ -33,7 +33,8 @@ function ChildState({ theme, agent }: { theme: PluginTheme; agent: AgentRecord }
 }
 function NativeChild({ child, parentAgent, theme, inset, onBack, header }: { child: ProviderSubagent; parentAgent: AgentRecord; theme: PluginTheme; inset: number; onBack: () => void; header?: ReactNode }) {
   const [tab, setTab] = useState<"result" | "timeline">("result"), [focusRef, setFocusRef] = useState<string | null>(null), foreground = useForeground();
-  const rootId = parentAgent.id, timeline = useTimeline({ agentId: rootId, subagentId: child.id }), fetchHead = useRpc(providerTimelineRpc);
+  // Reading a native sub-task loads its parent; a closed parent is read once, not polled (see AgentDetail).
+  const rootId = parentAgent.id, timeline = useTimeline({ agentId: rootId, subagentId: child.id }, true, parentAgent.rawStatus !== "closed"), fetchHead = useRpc(providerTimelineRpc);
   const first = useQuery({ queryKey: ["observatory-native-first-input", rootId, child.id, timeline.page?.epoch, child.status], queryFn: async () => {
     const result = await fetchHead({ parentAgentId: rootId, subagentId: child.id, direction: "after", limit: 100 }); if (result.error) throw new Error(result.error); return result.page;
   }, enabled: foreground && tab === "result" && !!timeline.page, staleTime: Infinity, retry: 1 });
@@ -61,7 +62,8 @@ export function SubtasksView({ agent, agents, theme, inset, onSelectAgent, onVie
   onViewParent?: () => void; header?: ReactNode }) {
   const fetch = useRpc(providerSubagentsRpc), [selected, setSelected] = useState<string | null>(null), [collapsed, setCollapsed] = useState<Set<string>>(new Set()), foreground = useForeground();
   const { colors } = theme;
-  const query = useQuery({ queryKey: ["observatory-provider-subagents", agent.id], queryFn: async () => { const result = await fetch({ parentAgentId: agent.id }); if (result.error) throw new Error(result.error); return result; }, enabled: foreground, refetchInterval: foreground ? 15000 : false, staleTime: 5000, retry: 1 });
+  // Listing native sub-tasks loads a closed Agent: read once, not polled, while it is closed (see AgentDetail).
+  const query = useQuery({ queryKey: ["observatory-provider-subagents", agent.id], queryFn: async () => { const result = await fetch({ parentAgentId: agent.id }); if (result.error) throw new Error(result.error); return result; }, enabled: foreground, refetchInterval: foreground && agent.rawStatus !== "closed" ? 15000 : false, staleTime: 5000, retry: 1 });
   const native = query.data?.subagents ?? [];
   const managed = useMemo(() => { const byParent = new Map<string, AgentRecord[]>(); for (const item of agents) { if (!item.parentAgentId) continue; const bucket = byParent.get(item.parentAgentId) ?? []; bucket.push(item); byParent.set(item.parentAgentId, bucket); } const stack = (byParent.get(agent.id) ?? []).slice().reverse().map(item => ({ item, depth: 0 })); const seen = new Set([agent.id]), rows: Array<{ item: AgentRecord; depth: number }> = []; while (stack.length) { const entry = stack.pop()!; if (seen.has(entry.item.id)) continue; seen.add(entry.item.id); rows.push(entry); const children = byParent.get(entry.item.id) ?? []; for (let i = children.length - 1; i >= 0; i--) stack.push({ item: children[i]!, depth: entry.depth + 1 }); } return rows; }, [agent.id, agents]);
   const nativeRows = useMemo(() => flattenSubtasks(subtaskForest(native, item => item.id, item => item.parentSubagentId), collapsed, item => item.id), [native, collapsed]);

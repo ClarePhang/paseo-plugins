@@ -4,10 +4,14 @@
  * Paseo 0.12 and older put the whole conversation in the hook's `timeline`; from 0.13 it is always `[]`
  * (getpaseo/paseo#7477) and plugins read what they need. `turnTimeline` keeps the hook's items when there are any.
  * Otherwise it reads the agent's projected timeline from the end backwards, `pageSize` rows a page, until
- * `enough(items)` holds (by default: the window reaches back to a user message, the start of the latest turn), the
+ * `enough(items)` holds (by default: the window reaches back to the start of the latest turn, see `isTurnStart`), the
  * start of the conversation, `maxRows`, or the deadline. It never throws: a failed or slow read keeps the newer pages
  * that came in before it. At turn end the agent is loaded, so reading it loads nothing.
  */
+
+import { hasTurnStart } from "../shared/turn-start";
+
+export { hasTurnStart, isTurnStart, latestTurnStart, turnStartText, type TurnStartItem } from "../shared/turn-start";
 
 /** The part of the plugin's `paseo` API this reads. */
 export interface TurnTimelinePaseo {
@@ -31,7 +35,7 @@ export interface TurnTimeline<Item> {
 }
 
 export interface TurnTimelineOptions<Item> {
-  /** Stop reading older pages once this holds. Default: a user message is among the items. */
+  /** Stop reading older pages once this holds. Default: a row that starts a turn is among the items (`hasTurnStart`). */
   enough?: (items: readonly Item[]) => boolean;
   /** Rows per page (default 100). */
   pageSize?: number;
@@ -57,7 +61,7 @@ export async function turnTimeline<Item extends { type: string }>(
   options: TurnTimelineOptions<Item> = {},
 ): Promise<TurnTimeline<Item>> {
   if (hookItems.length) return { items: [...hookItems], positions: hookItems.map((_, index) => index), complete: true, source: "hook" };
-  const enough = options.enough ?? hasUserMessage;
+  const enough = options.enough ?? hasTurnStart;
   const maxRows = Math.max(1, options.maxRows ?? MAX_ROWS);
   const pageSize = Math.max(1, Math.min(options.pageSize ?? PAGE_ROWS, maxRows));
   const deadline = Date.now() + (options.timeoutMs ?? READ_MS);

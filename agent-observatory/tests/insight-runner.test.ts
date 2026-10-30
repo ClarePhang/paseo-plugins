@@ -91,6 +91,20 @@ test("auto runs the Grok CLI when it is installed, otherwise Claude Code, Codex,
   assert.deepEqual([empty.auto.available, empty.auto.reason], [false, NO_RUNNER_ERROR]);
 });
 
+test("right after the daemon starts, the registry waits for provider discovery instead of calling them unusable (2.18)", async () => {
+  const loading = [entry("claude", { label: "Claude Code", status: "loading", modes: [] })];
+  const ready = [entry("claude", { label: "Claude Code", modes: [mode("default", { colorTier: "safe" })] })];
+  let waited = 0;
+  const paseo = { config: { get: async () => ({ config: { providers: {}, agentProfiles: [] } }) },
+    providers: { snapshot: async () => ({ entries: loading }), waitForReady: async (options: { timeoutMs?: number }) => { waited++; assert.equal(options.timeoutMs, 8_000); return { entries: ready }; } } } as unknown as PaseoApi;
+  const resolved = await new InsightRunnerRegistry(paseo, { findBinary: async () => null }).resolve({ kind: "auto" });
+  assert.equal(resolved.info.provider, "claude");
+  assert.equal(waited, 1);
+  // A host without waitForReady, or one whose discovery doesn't finish, keeps the snapshot it has.
+  const stuck = { ...paseo, providers: { snapshot: async () => ({ entries: loading }), waitForReady: async () => { throw new Error("timeout"); } } } as unknown as PaseoApi;
+  await assert.rejects(new InsightRunnerRegistry(stuck, { findBinary: async () => null }).resolve({ kind: "auto" }));
+});
+
 test("runner registry retains unavailable profiles and cautions providers without read-only access", async () => {
   const f = catalogFixture([entry("disabled"), entry("error", { status: "error", error: "登录失效" }), entry("unavailable", { status: "unavailable" }), entry("default", { modes: [mode("default", { colorTier: "safe" })] })],
     [{ id: "disabled", name: "Disabled", provider: "disabled" }, { id: "missing", name: "Missing", provider: "missing" }, { id: "error", name: "Error", provider: "error" }], {}, { disabled: { enabled: false } });
@@ -164,12 +178,24 @@ function runFixture(results: PaseoAgentRunResult[] = [result()]) {
 
 test("Paseo runner creates one parent-scoped helper with labels, schema and safe settings, then archives it", async () => {
   const f = runFixture([result("idle", { final: snapshot({ lastUsage: { inputTokens: 11, outputTokens: 7, totalCostUsd: 0.02 } }) })]);
-  const sessions: string[] = []; const output = await runPaseoStructured({ ...f.options, onSession: info => { sessions.push(info.sessionAgentId!); } });
+  const sessions: string[] = []; const output = await runPaseoStructured({ ...f.options, parent: { ...f.options.parent, workspaceId: null }, onSession: info => { sessions.push(info.sessionAgentId!); } });
   assert.equal(f.created.length, 1); const created = f.created[0];
   assert.equal(created.parent, "parent"); assert.equal(created.cwd, "/repo"); assert.equal(created.title?.length, 60); assert.equal(created.config.provider, "custom/m");
   assert.equal(created.config.modeId, "auto"); assert.deepEqual(created.config.options, { sandbox_mode: "read-only", approval_policy: "never" }); assert.equal(created.config.thinkingOptionId, "high"); assert.deepEqual(created.config.featureValues, { fast_mode: true });
   assert.deepEqual(created.labels, { "observatory.role": "insight", "observatory.job": "job-1" }); assert.equal("autoArchive" in created, false); assert.equal("worktree" in created, false); assert.deepEqual(created.outputSchema, z.toJSONSchema(outputSchema));
   assert.equal(output.value.summary, "有效观察"); assert.equal(output.runner.sessionAgentId, "helper"); assert.deepEqual(output.usage, { inputTokens: 11, outputTokens: 7, costUsd: 0.02 }); assert.deepEqual(sessions, ["helper"]); assert.equal(f.archived(), 1);
+});
+
+test("a helper for a live Agent starts in its workspace as its labelled sub-agent, so its prompt isn't wrapped as an Agent message (2.18)", async () => {
+  const f = runFixture();
+  await runPaseoStructured(f.options);
+  assert.equal(f.created.length, 0);
+  const made = f.workspaceCreated[0] as { id: string; options: PaseoAgentCreateOptions };
+  assert.equal(made.id, "workspace");
+  assert.equal("parent" in made.options, false);
+  assert.equal(made.options.prompt, "证据");
+  assert.deepEqual(made.options.labels, { "observatory.role": "insight", "observatory.job": "job-1", "paseo.parent-agent-id": "parent" });
+  assert.equal(f.archived(), 1);
 });
 
 test("Paseo runner never creates a helper without a verified restricted mode", async () => {
@@ -178,7 +204,7 @@ test("Paseo runner never creates a helper without a verified restricted mode", a
     await assert.rejects(runPaseoStructured({ ...f.options, plan: unsafePlan }), /受限模式/);
     assert.equal(f.created.length, 0); assert.equal(f.workspaceCreated.length, 0);
   }
-  const f = runFixture(); await runPaseoStructured({ ...f.options, plan: { ...plan, featureValues: { auto_accept: false, permissionMode: "bypassPermissions", fast_mode: true } } });
+  const f = runFixture(); await runPaseoStructured({ ...f.options, parent: { ...f.options.parent, workspaceId: null }, plan: { ...plan, featureValues: { auto_accept: false, permissionMode: "bypassPermissions", fast_mode: true } } });
   assert.deepEqual(f.created[0].config.featureValues, { auto_accept: false, fast_mode: true }); assert.equal(f.created[0].config.modeId, "auto");
 });
 
@@ -207,7 +233,7 @@ test("Paseo runner caps repeated permission requests and archives the helper", a
 test("Paseo runner retries invalid JSON on the same handle and accepts fenced or surrounded JSON", async () => {
   for (const text of ['```json\n{"summary":"fenced"}\n```', '说明：{"summary":"surrounded"} 结束']) {
     const f = runFixture([result("idle", { lastMessage: "not JSON" }), result("idle", { lastMessage: text })]);
-    let retries = 0; const output = await runPaseoStructured({ ...f.options, onRetry: () => { retries++; } });
+    let retries = 0; const output = await runPaseoStructured({ ...f.options, parent: { ...f.options.parent, workspaceId: null }, onRetry: () => { retries++; } });
     assert.ok(output.value.summary); assert.equal(f.created.length, 1); assert.equal(f.retry.length, 1); assert.match(f.retry[0], /只输出符合 schema 的 JSON/); assert.equal(retries, 1); assert.equal(f.archived(), 1);
   }
 });
@@ -232,7 +258,7 @@ test("Paseo runner archives a helper whose creation resolves after cancellation"
   const f = runFixture(), creating = deferred<PaseoAgentHandle>(), controller = new AbortController(), archived = deferred<void>();
   f.paseo.agents.create = async () => creating.promise;
   const original = f.handle.archive; f.handle.archive = async () => { const output = await original(); archived.resolve(); return output; };
-  const run = runPaseoStructured({ ...f.options, signal: controller.signal }); controller.abort(); await assert.rejects(run, /分析已取消/);
+  const run = runPaseoStructured({ ...f.options, parent: { ...f.options.parent, workspaceId: null }, signal: controller.signal }); controller.abort(); await assert.rejects(run, /分析已取消/);
   creating.resolve(f.handle); await archived.promise; assert.equal(f.archived(), 1);
 });
 

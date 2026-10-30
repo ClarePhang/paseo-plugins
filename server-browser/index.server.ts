@@ -33,8 +33,9 @@ export default function contribute(server:PluginServerContext,deps:{manager?:Bro
   }).catch(error=>{restoreTask=undefined;throw error;});
   return restoreTask;
  };
- // Lifecycle hooks only start restoration. The daemon awaits before-hooks and aborts the session open when one throws,
- // so an Agent never waits on (or fails because of) the workspace listing; the MCP bridge waits for a restoring browser itself.
+ // Lifecycle events only start restoration, so an Agent never waits on (or fails because of) the workspace listing; the
+ // MCP bridge waits for a restoring browser itself. No before('agent.session_open') hook: from Paseo 0.14 every start,
+ // stop or reload of a plugin with one makes each open Agent session reopen (provider process restarted) before its next prompt.
  // i18n-ignore: daemon log only.
  const restoreSoon=(paseo:Paseo)=>{void restore(paseo).catch(()=>console.warn('服务器浏览器暂时无法核对工作区，将在下次面板或 Agent 活动时重试恢复。'));};
  const validate=async(paseo:Paseo,workspaceId:string)=>{remember(await directory.require(paseo,workspaceId));await restore(paseo);};
@@ -56,7 +57,6 @@ export default function contribute(server:PluginServerContext,deps:{manager?:Bro
  handle(diagnosticsRpc,async({workspaceId},{paseo})=>{await validate(paseo,workspaceId);const result=await manager.diagnostics(workspaceId);return {...result,session:await linkedState(paseo,result.session)};});
  handle(readPageRpc,async(input,{paseo})=>{await validate(paseo,input.workspaceId);return manager.read(input.workspaceId,input);});
  server.on('agent.turn_started',({agent},{paseo})=>{ports.invalidateAgent(agent.id);restoreSoon(paseo);});
- server.before('agent.session_open',(_input,{paseo})=>{restoreSoon(paseo);});
  // Orphan cleanup deliberately bypasses require(): an archived workspace has no normal panel entry.
  handle(orphanRpc,async(_input,{paseo})=>({items:await manager.listOrphans((await directory.list(paseo)).map(item=>item.id))}));
  // Stopping or deleting a leftover retires that workspace in the manager; the directory records it too, so that if the
@@ -67,7 +67,7 @@ export default function contribute(server:PluginServerContext,deps:{manager?:Bro
  const invalidateAgent=(agent:{id:string;workspaceId:string|null})=>{agentDirectory.invalidate(agent.workspaceId??undefined);overview.invalidate();ports.invalidateAgent(agent.id);};
  server.on('agent.archived',({agent})=>{invalidateAgent(agent);});
  server.on('agent.closed',({agent})=>{invalidateAgent(agent);});
- server.on('agent.created',({agent})=>{invalidateAgent(agent);});
+ server.on('agent.created',({agent},{paseo})=>{invalidateAgent(agent);restoreSoon(paseo);});
  server.on('workspace.created',()=>{directory.invalidate();overview.invalidate();});
  server.on('workspace.archived',async({workspace})=>{directory.retire(workspace.id);agentDirectory.invalidate(workspace.id);overview.invalidate();await manager.retireWorkspace(workspace.id);});
  return async()=>{locales.dispose();await manager.close();};

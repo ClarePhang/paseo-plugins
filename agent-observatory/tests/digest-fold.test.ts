@@ -104,3 +104,15 @@ test("a full window rolls forward using compact facts without fetching old histo
   assert.deepEqual(next.state, rebuilt.state); assert.equal(next.state.rows, 8000); assert.equal(next.facts.size, 8000);
   assert.ok(!JSON.stringify([...next.facts.values()]).includes("BODY_MUST_NOT_BE_RETAINED"));
 });
+
+test("a schedule's prompt or another agent's message opens a turn without a turn id, and is no tool (Paseo 0.14)", () => {
+  const replayed = [row(1, 1000, { type: "user_message", text: "build it" }, ""), row(2, 2000, { type: "assistant_message", text: "built" }, ""),
+    row(3, 3000, { type: "tool_call", callId: "paseo-system:3f2a", name: "heartbeat", status: "completed", detail: { type: "plain_text", text: "Schedule \"nightly\" fired.\ncheck the build" } }, ""),
+    row(4, 4000, { type: "tool_call", callId: "c1", name: "Bash", status: "completed", detail: { type: "shell", command: "npm test", exitCode: 0 } }, ""),
+    row(5, 5000, { type: "assistant_message", text: "green" }, ""),
+    row(6, 6000, { type: "tool_call", callId: "paseo-agent-message:m1", name: "agent_message", status: "completed", agentMessage: { event: "finished", sender: { id: "c" }, text: "child done" }, detail: { type: "plain_text", text: "child done" } }, ""),
+    row(7, 7000, { type: "assistant_message", text: "noted" }, "")];
+  const state = foldRows(createFold("a", "/repo", "epoch"), normalizeTimelinePage({ epoch: "epoch", entries: replayed }).rows.map(value => compactRow(value, "/repo")));
+  assert.deepEqual(state.turns.map(turn => [turn.prompt, turn.reply]), [["build it", "built"], ["Schedule \"nightly\" fired. check the build", "green"], ["child done", "noted"]]);
+  assert.deepEqual([...state.tools.values()].map(tool => tool.name), ["Bash"]);
+});

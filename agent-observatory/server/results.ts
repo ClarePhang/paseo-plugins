@@ -11,6 +11,7 @@ import { finalReplyAfter, replyAsksUser, replyNudge, type ReplyNudge } from "../
 import { findChangeRequest } from "../shared/change-request";
 import type { ChangeRequestLink } from "../shared/telemetry";
 import { applyTelemetry, knownCompletionAt, normalizeAgent, observedRound, type AgentSource } from "../shared/model";
+import { isTurnStart, turnStartText, type TurnStartItem } from "../shared/turn-start";
 
 /** The final reply of a stopped Agent, reduced to what 待回复 needs; no text leaves the result reader this way. */
 export type ReplyObservation = { userAt: string; at: string; asks: boolean; link?: ChangeRequestLink | null; nudge?: ReplyNudge | null };
@@ -28,7 +29,7 @@ function verifySource(source: Record<string, unknown>, expected: ExpectedSource)
   }
 }
 function excerpt(agentId: string, row: TimelineRow): ResultExcerpt {
-  const full = string(row.item.text) || string(row.item.message) || t("serverResults.m002");
+  const full = string(row.item.text) || string(row.item.message) || turnStartText(row.item as TurnStartItem) || t("serverResults.m002");
   const clipped = excerptText(full, 60_000);
   return { ...clipped, ref: reference(agentId, row), at: finiteTime(row.timestamp) === null ? null : row.timestamp };
 }
@@ -109,7 +110,7 @@ export async function fetchAgentResult(paseo: PaseoApi, agentId: string, observe
     if (next.epoch !== head.epoch || next.reset) break;
     head = next; headRows = uniqueRows([...headRows, ...next.rows]); first = headRows.find(row => row.item.type === "user_message");
   }
-  while (tail.hasOlder && tail.startCursor && !tailRows.some(row => row.item.type === "user_message") && pages < 12) {
+  while (tail.hasOlder && tail.startCursor && !tailRows.some(row => isTurnStart(row.item as TurnStartItem)) && pages < 12) {
     const key = `tail:${tail.startCursor.epoch}:${tail.startCursor.seq}`;
     if (cursors.has(key)) break; cursors.add(key);
     const next = normalizeTimelinePage(await handle.timeline.refetch({ direction: "before", cursor: tail.startCursor, limit: 100, projection: "projected" })); pages++;
@@ -121,7 +122,8 @@ export async function fetchAgentResult(paseo: PaseoApi, agentId: string, observe
   const source = object(confirmed?.agent ?? handle.current?.() ?? object(tailRaw).agent ?? initial.agent);
   verifySource(source, expected);
   const isRunning = source.status === "running" || source.status === "initializing" || !!source.activeTurn;
-  const latestUser = [...tailRows].reverse().find(row => row.item.type === "user_message");
+  // The row that started the latest turn: a user message, or (as tool calls) another agent's message or a schedule's prompt.
+  const latestUser = [...tailRows].reverse().find(row => isTurnStart(row.item as TurnStartItem));
   const userAt = finiteTime(source.lastUserMessageAt);
   // The host stamps the prompt row and the Agent's lastUserMessageAt separately, a millisecond or two apart; only a prompt
   // clearly older than the latest one means the tail has not caught up with a newer turn yet.
@@ -139,7 +141,7 @@ export async function fetchAgentResult(paseo: PaseoApi, agentId: string, observe
   const firstInputConfirmed = !!first && typeof window.minSeq === "number" && window.minSeq <= 1 && !normalizeTimelinePage(headRaw).hasOlder && !normalizeTimelinePage(headRaw).gap;
   const artifacts: AgentResult["artifacts"] = [], testEvidence: AgentResult["testEvidence"] = [];
   const artifactKeys = new Set<string>();
-  const tools = tailRows.filter(row => row.item.type === "tool_call");
+  const tools = tailRows.filter(row => row.item.type === "tool_call" && !isTurnStart(row.item as TurnStartItem));
   for (const row of [...tools].reverse()) {
     const detail = object(row.item.detail), name = string(row.item.name), file = string(detail.filePath), command = string(detail.command);
     if (file && /write|edit|file_change|patch/.test(`${string(detail.type)} ${name}`) && !artifactKeys.has(file) && artifacts.length < 40) {

@@ -164,7 +164,7 @@ export function StopCard({ theme, agent, heartbeats, onOpenConversation, onSched
   </>;
 }
 
-function Card({ theme, hue, icon, title, pill, text, note, actions, pulse = false, children }: { theme: PluginTheme; hue: Hue; icon: string; title: string; pill?: ReactNode; text: string; note?: string | null;
+export function Card({ theme, hue, icon, title, pill, text, note, actions, pulse = false, children }: { theme: PluginTheme; hue: Hue; icon: string; title: string; pill?: ReactNode; text: string; note?: string | null;
   actions?: ReactNode; pulse?: boolean; children?: ReactNode }) {
   const color = hueColor(theme, hue);
   return <View testID="stop-card" style={{ gap: space.sm, padding: space.md, borderRadius: radius.lg, borderWidth: hairline, borderColor: tint(color, 0.5), backgroundColor: tint(color, tintAlpha(theme) * 0.7) }}>

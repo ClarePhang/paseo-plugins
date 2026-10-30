@@ -86,7 +86,10 @@ export function ChildAgentTimeline({
   const feed = useChildFeed(agentId, foreground, visibility, serverId);
   const entries = feed.view.entries;
   const status = feed.status;
-  const statusColor = status ? childStatusColor(status, palette) : palette.categoryColors.agent;
+  // 0.10: a sub-agent waiting for you, or one that failed, says so loudly on its parent's row (from the server's read).
+  const waiting = status === "running" || status === "initializing" ? feed.view.agent?.waiting ?? null : null;
+  const errorLine = status === "error" ? feed.view.agent?.error ?? null : null;
+  const statusColor = waiting ? theme.colors.statusWarning : status ? childStatusColor(status, palette) : palette.categoryColors.agent;
   // A child this app does not list may run on another host: until its server says, it is being looked up, not missing.
   const lookingUp = !!serverId && !feed.view.heard && feed.hold === "unknown";
   const note = feed.view.offline ? t("ui.childHostOffline", { host: feed.view.host ?? "" })
@@ -101,7 +104,14 @@ export function ChildAgentTimeline({
             <Text numberOfLines={1} style={[styles.paseoListItemMeta, { flexShrink: 1 }]}>{t("ui.childOnHost", { host: feed.view.host })}</Text>
           ) : null}
         </View>
-        {status ? (
+        {waiting ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <Breathe><StatusDot theme={theme} tone="warning" size={7} /></Breathe>
+            <Text style={[styles.paseoListItemMeta, { color: statusColor, fontWeight: "700" }]}>
+              {waiting === "question" ? t("ui.childAsks") : t("ui.childWaitsApproval")}
+            </Text>
+          </View>
+        ) : status ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             {status === "running" || status === "initializing" ? (
               <Breathe><StatusDot theme={theme} tone={childStatusTone(status)} size={7} /></Breathe>
@@ -114,6 +124,15 @@ export function ChildAgentTimeline({
           </View>
         ) : null}
       </View>
+      {waiting ? (
+        <Text style={[styles.mutedText, { color: theme.colors.statusWarning }]}>
+          {waiting === "question" ? t("ui.childAsksNote") : t("ui.childWaitsApprovalNote")}
+        </Text>
+      ) : errorLine ? (
+        <Text numberOfLines={2} style={[styles.mutedText, { color: theme.colors.statusDanger }]}>
+          {t("ui.childFailedNote", { error: errorLine })}
+        </Text>
+      ) : null}
       {note ? (
         <View style={{ gap: 6, alignItems: "flex-start" }}>
           <Text style={styles.mutedText}>{note}</Text>

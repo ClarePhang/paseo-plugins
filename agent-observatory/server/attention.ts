@@ -5,12 +5,13 @@ import { enrichAgents, type BackgroundAgent } from "../shared/background";
 import { applyArchiveReadOrigin, applyReadReceipt, type AgentRecord, type AgentTodo } from "../shared/model";
 import { needsAttention } from "../shared/dashboard-model";
 import { isCompletionSnoozed, type CompletionSnooze, type ObservatorySettings } from "../shared/preferences";
-import { applyLiveExtras, attentionPhase, entryOf, getAttention, getLiveExtras, loudPhases, phaseRank, waitingSince, ATTENTION_PHASES, type AttentionPhase, type AttentionResponse, type AttentionSummary, type LiveExtra, type LiveExtrasResponse } from "../shared/attention";
+import { applyLiveExtras, attentionPhase, entryOf, getAttention, getLiveExtras, seeLiveIssue, loudPhases, phaseRank, waitingSince, ATTENTION_PHASES, type AttentionPhase, type AttentionResponse, type AttentionSummary, type LiveExtra, type LiveExtrasResponse } from "../shared/attention";
 import { chimeKindEnabled, chimeKindOf, quietHours, type AlertSettings, type ChimeEvent, type ChimeKind, type ChimeState } from "../shared/alerts";
 import type { TelemetrySnapshot } from "../shared/telemetry";
 import type { ReadReceipt, ArchiveReadOrigin } from "../shared/read-state";
 import { normalizeTimelinePage, object, projectTimelineRows, string, type TimelineItem } from "../shared/timeline";
 import { redactSecrets } from "./insight-analysis";
+import { activitySignature, detectLoop, shortHash, stuckLimit, toolStepOf, type LiveIssue, type ToolStep } from "../shared/live-issue";
 import { contentRevision } from "./revision";
 
 /** What the summary is computed from; the same inputs (and rules) the page uses. */
@@ -57,6 +58,8 @@ export function noteOf(body: unknown): string | null {
   return text ? text.length > NOTE_MAX ? `${text.slice(0, NOTE_MAX - 1)}…` : text : null;
 }
 /** The sentence a reply's 快捷回复 answer (shared/reply.ts `nudgeSentence`), redacted like a note, on one line of at most 120 characters. */
+/** Rows of a running turn read for its todo list and live issues: enough for the 16-call rotation window. */
+const LIVE_ROWS = 80;
 export function askOf(sentence: unknown): string | null {
   const text = redactSecrets(string(sentence)).replace(/\s+/g, " ").trim(), chars = Array.from(text);
   return text ? chars.length > ASK_MAX ? `${chars.slice(0, ASK_MAX - 1).join("")}…` : text : null;
@@ -95,6 +98,12 @@ export class AttentionIndex {
   private readonly asks = new Map<string, { ask: string; at: string }>();
   private readonly todos = new Map<string, AgentTodo>();
   private readonly todoReadAt = new Map<string, number>();
+  /** 原地打转 / 可能卡住 of running turns (2.18), memory only. */
+  private readonly issues = new Map<string, Omit<LiveIssue, "seen">>();
+  /** When the turn's latest rows last changed, as this process saw them. */
+  private readonly activity = new Map<string, { turn: string; signature: string; changedAt: number }>();
+  /** 知道了: the issue key the user saw, per Agent. */
+  private readonly seenIssues = new Map<string, string>();
   private todoReading: Promise<void> | null = null;
   private closed = false;
   /** Kept observing without readers (同步到侧栏标签), and told of every directory change. */
@@ -128,7 +137,7 @@ export class AttentionIndex {
       };
       const directory = createAgentDirectory(api, { includeArchived: false, notifyDelayMs: 0 });
       this.directory = directory;
-      directory.subscribe(() => { for (const listener of this.changeListeners) listener(); });
+      directory.subscribe(() => this.changed());
       directory.start(true);
       this.started = directory.refresh();
     }
@@ -165,10 +174,19 @@ export class AttentionIndex {
     while (this.asks.size > MAX_NOTES) this.asks.delete(this.asks.keys().next().value!);
   }
   /** A new turn makes the old todo list, note and quick replies' sentence stale. */
-  turnStarted(agentId: string): void { this.todos.delete(agentId); this.todoReadAt.delete(agentId); this.asks.delete(agentId); }
+  turnStarted(agentId: string): void { this.todos.delete(agentId); this.todoReadAt.delete(agentId); this.asks.delete(agentId); this.forgetIssue(agentId); }
   /** The turn's final todo list is no longer progress; the next turn reads it again. */
-  turnEnded(agentId: string): void { this.todos.delete(agentId); this.todoReadAt.delete(agentId); }
-  closedAgent(agentId: string): void { this.todos.delete(agentId); this.todoReadAt.delete(agentId); }
+  turnEnded(agentId: string): void { this.todos.delete(agentId); this.todoReadAt.delete(agentId); this.forgetIssue(agentId); }
+  closedAgent(agentId: string): void { this.todos.delete(agentId); this.todoReadAt.delete(agentId); this.forgetIssue(agentId); }
+  private forgetIssue(agentId: string): void { this.issues.delete(agentId); this.activity.delete(agentId); this.seenIssues.delete(agentId); }
+  /** 知道了 on a live issue: it stays shown, and stops counting until a new pattern or a later turn. */
+  seeIssue(agentId: string, key: string): boolean {
+    const issue = this.issues.get(agentId);
+    if (!issue || issue.key !== key) return false;
+    this.seenIssues.set(agentId, key);
+    this.changed();
+    return true;
+  }
 
   /** The page's records, enriched exactly as the page does it (lifecycle, background, receipts, notes, todos). */
   private async records(): Promise<{ agents: AgentRecord[]; truncated: boolean; ready: boolean; failed: boolean }> {
@@ -186,6 +204,8 @@ export class AttentionIndex {
   /** Everything that needs you, by the page's rules, waiting longest first within each rank. */
   private async waiting(): Promise<{ waiting: Waiting[]; truncated: boolean; ready: boolean; failed: boolean }> {
     const [{ agents, truncated, ready, failed }, { snoozes, settings }] = await Promise.all([this.records(), this.sources.preferences()]);
+    // The badge's reads keep running turns watched (原地打转 / 可能卡住), not only an open page's.
+    void this.readTodos(agents);
     const now = this.now();
     const waiting = agents.filter(agent => needsAttention(agent, isCompletionSnoozed(agent, snoozes, now), { childCompletions: settings.childCompletions }))
       .map(agent => { const phase = attentionPhase(agent) ?? "unread" as const; return { agent, phase, rank: phaseRank[phase], since: waitingSince(agent, phase) }; })
@@ -226,9 +246,13 @@ export class AttentionIndex {
   }
 
   extras(): LiveExtra[] {
-    const ids = new Set([...this.notes.keys(), ...this.todos.keys(), ...this.asks.keys()]);
-    return [...ids].slice(-500).map(agentId => ({ agentId, todo: this.todos.get(agentId) ?? null, note: this.notes.get(agentId)?.note ?? null, noteAt: this.notes.get(agentId)?.at ?? null,
-      ask: this.asks.get(agentId)?.ask ?? null, askAt: this.asks.get(agentId)?.at ?? null }));
+    const ids = new Set([...this.notes.keys(), ...this.todos.keys(), ...this.asks.keys(), ...this.issues.keys()]);
+    return [...ids].slice(-500).map(agentId => {
+      const issue = this.issues.get(agentId);
+      return { agentId, todo: this.todos.get(agentId) ?? null, note: this.notes.get(agentId)?.note ?? null, noteAt: this.notes.get(agentId)?.at ?? null,
+        ask: this.asks.get(agentId)?.ask ?? null, askAt: this.asks.get(agentId)?.at ?? null,
+        issue: issue ? { ...issue, seen: this.seenIssues.get(agentId) === issue.key } : null };
+    });
   }
   async readExtras(input: { revision?: string } = {}): Promise<LiveExtrasResponse> {
     const records = await this.records();
@@ -238,8 +262,8 @@ export class AttentionIndex {
   }
 
   /**
-   * Todo progress of running Agents: their timeline tail, read at most every `todoEveryMs` each and only for Agents this
-   * process has seen live (a running Agent is loaded; asking about an unloaded one would load it).
+   * Todo progress and live issues (原地打转 / 可能卡住) of running Agents: their timeline tail, read at most every `todoEveryMs`
+   * each and only for Agents this process has seen live (a running Agent is loaded; asking about an unloaded one would load it).
    */
   private readTodos(agents: readonly AgentRecord[]): Promise<void> {
     const paseo = this.paseo;
@@ -253,18 +277,55 @@ export class AttentionIndex {
         if (this.closed) return;
         this.todoReadAt.set(agent.id, now);
         try {
-          const page = normalizeTimelinePage(await paseo.agents.ref(agent.id).timeline.refetch({ direction: "tail", limit: 20, projection: "projected" }));
+          const page = normalizeTimelinePage(await paseo.agents.ref(agent.id).timeline.refetch({ direction: "tail", limit: LIVE_ROWS, projection: "projected" }));
           const start = Date.parse(agent.activeTurnStartedAt!);
           // Only this turn's lists count; an older one in the tail is the previous turn's.
           const rows = projectTimelineRows(page.rows).filter(row => Date.parse(row.timestamp) >= start - 1000);
           const todo = todoOf(rows.map(row => row.item), new Date(now).toISOString());
           if (todo) this.todos.set(agent.id, todo);
+          this.watchTurn(agent.id, agent.activeTurnStartedAt!, rows.map(row => ({ item: row.item, at: Date.parse(row.timestamp) })), now, (agent.background?.running ?? 0) > 0);
         } catch { /* keep the last known progress */ }
       }
       while (this.todoReadAt.size > 2_000) this.todoReadAt.delete(this.todoReadAt.keys().next().value!);
     })().finally(() => { this.todoReading = null; });
     return this.todoReading;
   }
+
+  /**
+   * 原地打转 / 可能卡住 for one running turn, from its latest rows: a loop in its tool calls (shared/live-issue.ts), or rows that
+   * stopped changing for 10 minutes (45 while a tool call still runs). A pattern keeps the time it was first seen. While its
+   * sub-agents or background agents work (`delegated`) the Agent waits on them, not stuck: its quiet clock starts when they stop.
+   */
+  private watchTurn(agentId: string, turn: string, rows: ReadonlyArray<{ item: TimelineItem; at: number }>, now: number, delegated = false): void {
+    const items = rows.map(row => row.item);
+    const signature = activitySignature(items), previous = this.activity.get(agentId);
+    const changedAt = !delegated && previous && previous.turn === turn && previous.signature === signature ? previous.changedAt : now;
+    this.activity.set(agentId, { turn, signature, changedAt });
+    while (this.activity.size > 2_000) this.activity.delete(this.activity.keys().next().value!);
+    const short = (value: string, max: number) => { const clean = redactSecrets(value).replace(/\s+/g, " ").trim(); return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean; };
+    const steps = rows.map(row => toolStepOf(row.item, row.at)).filter((step): step is ToolStep => step !== null && Number.isFinite(step.at));
+    const loop = detectLoop(steps), held = this.issues.get(agentId);
+    let issue: Omit<LiveIssue, "seen"> | null = null;
+    if (loop) {
+      const key = `${turn}:${loop.key}`;
+      issue = { kind: "looping", key, since: held?.key === key ? held.since : new Date(now).toISOString(), pattern: loop.pattern, tool: short(loop.tool, 120) || null,
+        count: loop.count, toolRunning: false, evidence: loop.evidence.map(line => short(line, 160)) };
+    } else {
+      const { limitMs, running } = stuckLimit(items), quietFor = now - changedAt, turnAge = now - Date.parse(turn);
+      if (quietFor >= limitMs && turnAge >= limitMs) {
+        const key = `${turn}:stuck:${shortHash(signature)}`;
+        issue = { kind: "stuck", key, since: new Date(changedAt).toISOString(), pattern: null, tool: running ? short(running.label || running.name, 120) || null : null,
+          count: Math.floor(quietFor / 60_000), toolRunning: !!running, evidence: steps.slice(-3).map(step => short(`${step.name} ${step.label}`, 160)) };
+      }
+    }
+    if (issue) this.issues.set(agentId, issue);
+    else { this.issues.delete(agentId); this.seenIssues.delete(agentId); }
+    while (this.issues.size > 500) this.issues.delete(this.issues.keys().next().value!);
+    // A new, changed or cleared issue has no directory event of its own: the sidebar labels hear it here.
+    if ((issue?.key ?? null) !== (held?.key ?? null)) this.changed();
+  }
+
+  private changed(): void { for (const listener of this.changeListeners) listener(); }
 
   /** Let go of the observation and the stream when nobody has read for a while (or on close). */
   private release(force: boolean): void {
@@ -274,7 +335,7 @@ export class AttentionIndex {
     void stream?.release().catch(() => {});
     if (this.idleTimer) { clearInterval(this.idleTimer); this.idleTimer = null; }
   }
-  close(): void { this.closed = true; this.release(true); this.notes.clear(); this.todos.clear(); this.asks.clear(); this.changeListeners.clear(); }
+  close(): void { this.closed = true; this.release(true); this.notes.clear(); this.todos.clear(); this.asks.clear(); this.issues.clear(); this.activity.clear(); this.seenIssues.clear(); this.changeListeners.clear(); }
 }
 
 export function registerAttention(server: PluginServerContext, sources: AttentionSources, options: AttentionOptions = {}) {
@@ -285,5 +346,6 @@ export function registerAttention(server: PluginServerContext, sources: Attentio
   };
   server.handle(getAttention, async (input, { paseo }) => { if (input.timeZone) sources.noteZone?.(input.timeZone); await ready(paseo); return index.read(input); });
   server.handle(getLiveExtras, async (input, { paseo }) => { await ready(paseo); return index.readExtras(input); });
+  server.handle(seeLiveIssue, async (input, { paseo }) => { await ready(paseo); return { ok: index.seeIssue(input.agentId, input.key) }; });
   return index;
 }

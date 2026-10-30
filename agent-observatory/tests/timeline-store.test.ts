@@ -207,3 +207,21 @@ test("a tail that starts beyond the cached end replaces it instead of leaving a 
   assert.deepEqual(store.getSnapshot().page?.rows.map(row => row.seqStart), [400, 401, 402], "overlapping tails still merge");
   release();
 });
+test("no fallback poll while the Agent is closed (each read would load it again); turning polling back on reads what was missed", async () => {
+  const time = clock(), directions: string[] = [], emitter: { emit?: (event: unknown) => void } = {};
+  const store = createTimelineStore({ fetch: async input => { directions.push(input.direction); return page([10, 11]); }, subscribe: live(emitter) }, { clock: time.value });
+  store.setPolling(false);
+  const release = store.acquire(); await settle();
+  assert.deepEqual(directions, ["tail"], "opening still reads once");
+  await time.advance(5 * 60_000);
+  assert.deepEqual(directions, ["tail"], "no 30 s fallback while closed");
+  emitter.emit!({ event: { type: "error", error: "released" } }); await time.advance(60_000);
+  assert.deepEqual(directions, ["tail"], "a dropped observation does not read either");
+  await store.refresh(); await time.advance(1);
+  assert.deepEqual(directions, ["tail", "tail"], "a refresh the user asks for still reads");
+  store.setPolling(true); await time.advance(2_000);
+  assert.equal(directions.length, 3, "loaded again: one read for what was missed");
+  await time.advance(30_000);
+  assert.equal(directions.length, 4, "then the fallback poll as before");
+  release(); assert.equal(time.timers, 0);
+});

@@ -55,6 +55,24 @@ function cardStatus(agent: ChildRecord): string | null {
   return agent.archivedAt || !childLoaded(agent) ? "closed" : agent.status ?? null;
 }
 
+const TOKEN = /\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{16,}|xox[abprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g;
+/** The first line of an error, short, with common token shapes masked: the phone shows it on the parent's row. */
+export function errorLine(value: unknown): string | null {
+  const line = typeof value === "string" ? value.split("\n").map((part) => part.trim()).find(Boolean) : undefined;
+  if (!line) return null;
+  const masked = line.replace(TOKEN, "[redacted]").replace(/\b(Bearer|token=|api[_-]?key=)\s*\S+/gi, "$1 [redacted]");
+  return masked.length > 150 ? `${masked.slice(0, 149)}…` : masked;
+}
+
+/** What the card shows of the child: its status, and (0.10) whether it waits for you or why it failed. */
+function cardAgent(agent: ChildRecord & { pendingPermissions?: unknown; lastError?: unknown }, status: string): NonNullable<ChildSummaryOutput["agent"]> {
+  const pending = Array.isArray(agent.pendingPermissions) ? agent.pendingPermissions : [];
+  const waiting = status === "closed" || !pending.length ? null
+    : pending.every((item) => !!item && typeof item === "object" && (item as { kind?: unknown }).kind === "question") ? "question" as const : "approval" as const;
+  const error = status === "error" ? errorLine(agent.lastError) : null;
+  return { status, ...(waiting ? { waiting } : {}), ...(error ? { error } : {}) };
+}
+
 /**
  * Reads where the child runs; the phone receives only the three compact rows it actually draws. 0.6.0 merge: the card's
  * 0.6.0 rules for reading a child (loaded by its record, fail closed when the status check fails) moved here with the
@@ -94,20 +112,22 @@ async function summarize(input: ChildSummaryInput, paseo: PluginHandlerContext["
   }
   if (agent === null) return missing;
   const status = agent ? cardStatus(agent) : null;
-  const current = status ? { status } : null;
+  const current = status && agent ? cardAgent(agent, status) : null;
   if (!input.manual && !childReadable(status)) return { status: "closed", agent: current, rows: [], ...where };
   if (input.statusOnly) return { status: "ok", agent: current, rows: [], ...where };
   const page = await handle.timeline.refetch({ direction: "tail", limit: CHILD_TIMELINE_PAGE_SIZE, projection: "projected" });
   const after = page.agent ? cardStatus(page.agent) : status;
   const output: ChildSummaryOutput = {
     status: "ok",
-    agent: after ? { status: after } : null,
+    agent: after ? cardAgent({ ...(agent ?? {}), ...(page.agent ?? {}) }, after) : null,
     rows: recentChildTimelineEntries(page.entries).slice(-3).map(childSummaryRow),
     ...where,
   };
   // Keep even three long tool summaries below ~10 KiB/min (12 responses plus RPC envelopes and 4/3 relay expansion).
   // Sequence start is stable for an updated entry; the revision sequence need not cross the wire just to key a row.
-  while (Buffer.byteLength(JSON.stringify(output)) > 500) {
+  // A failed child's error line (0.10) comes on top: it doesn't take the rows' room.
+  const limit = 500 + (output.agent?.error ? Buffer.byteLength(JSON.stringify(output.agent.error)) : 0);
+  while (Buffer.byteLength(JSON.stringify(output)) > limit) {
     const candidates = output.rows.filter((row) => row.x && Buffer.byteLength(row.x) > 3);
     const longest = candidates.sort((left, right) => Buffer.byteLength(right.x!) - Buffer.byteLength(left.x!))[0];
     if (longest) {

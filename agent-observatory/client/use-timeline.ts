@@ -6,7 +6,8 @@ import { useForeground } from "./use-foreground";
 
 export interface TimelineTarget { agentId: string; subagentId?: string }
 const hostCaches = new WeakMap<object, ReturnType<typeof createTimelineCache>>();
-export function useTimeline(target: TimelineTarget, enabled = true) {
+/** `polling`: false while the Agent (for a native sub-task, its parent) is closed, so the fallback poll doesn't load it again. */
+export function useTimeline(target: TimelineTarget, enabled = true, polling = true) {
   const paseo = usePaseo(), fetchProviderTimeline = useRpc(providerTimelineRpc);
   const foreground = useForeground();
   const { agentId, subagentId } = target;
@@ -25,6 +26,7 @@ export function useTimeline(target: TimelineTarget, enabled = true) {
     });
   }, [paseo, agentId, subagentId, fetchProviderTimeline]);
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  useEffect(() => { store.setPolling(polling); }, [store, polling]);
   useEffect(() => { if (enabled && foreground) return store.acquire(); }, [store, enabled, foreground]);
   return { ...state, refresh: store.refresh, loadOlder: store.loadOlder, setViewState: store.setViewState };
 }

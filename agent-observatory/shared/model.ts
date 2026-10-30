@@ -1,3 +1,4 @@
+import type { LiveIssue } from "./live-issue";
 import { t } from "./text";
 /** Pure dashboard models. This module is shared by native and web clients. */
 import type { StopReason } from "./stop-reason";
@@ -119,6 +120,8 @@ export interface AgentRecord {
   replyAsk?: string | null;
   /** The running turn's todo progress (live extras from the server). */
   todo?: AgentTodo | null;
+  /** The running turn is going in circles or has been quiet for long (2.18, live extras from the server). */
+  issue?: LiveIssue | null;
   /** The host's own attention note for the latest event (its notification body), in memory only. */
   note?: string | null;
   /** The latest merge or pull request the Agent's final replies linked to (`!12` / `#34`). */

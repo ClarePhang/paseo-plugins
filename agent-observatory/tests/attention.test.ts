@@ -86,7 +86,7 @@ test("the server summary uses the page's rules: blocking first, oldest first, sn
   // The host's attention note reaches the live extras (memory only).
   host.emit({ type: "agent_attention_required", payload: { agentId: "unread", reason: "finished", timestamp: T, shouldNotify: true, notification: { title: "x", body: "发版完成，要不要通知团队？" } } });
   const extras = await index.readExtras();
-  assert.deepEqual(extras.mode === "full" && extras.agents, [{ agentId: "unread", todo: null, note: "发版完成，要不要通知团队？", noteAt: T, ask: null, askAt: null }]);
+  assert.deepEqual(extras.mode === "full" && extras.agents, [{ agentId: "unread", todo: null, note: "发版完成，要不要通知团队？", noteAt: T, ask: null, askAt: null, issue: null }]);
   // A later request's note is not a result: it never replaces the finished turn's note.
   host.emit({ type: "agent_attention_required", payload: { agentId: "unread", reason: "permission", timestamp: T, shouldNotify: true, notification: { title: "x", body: "要执行 rm -rf dist" } } });
   const after = await index.readExtras();
@@ -152,7 +152,7 @@ test("the sentence a reply's quick replies answer: memory only, redacted, forgot
     assert.equal(applyLiveExtras([agent], [{ agentId: "a", todo: null, note: null, noteAt: null, ask: "要我继续吗？", askAt: "2026-10-11T03:01:00.000Z" }])[0]!.replyAsk, "要我继续吗？");
     // An older server sends no sentence: it parses, as none.
     assert.deepEqual(getLiveExtras.output.parse({ mode: "full", unchanged: false, revision: "r", agents: [{ agentId: "a", todo: null, note: null, noteAt: null }] }),
-      { mode: "full", unchanged: false, revision: "r", agents: [{ agentId: "a", todo: null, note: null, noteAt: null, ask: null, askAt: null }] });
+      { mode: "full", unchanged: false, revision: "r", agents: [{ agentId: "a", todo: null, note: null, noteAt: null, ask: null, askAt: null, issue: null }] });
   } finally { index.close(); }
 });
 

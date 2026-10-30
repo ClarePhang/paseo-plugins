@@ -101,7 +101,7 @@ function EntryBlock({ theme, entry, recap, now, compact, onOpen, onChanged }: { 
 /** One waiting Agent: its state's mark, its title and the reason in the state's colour, and how long it has waited. */
 function EntryRow({ theme, entry, now, onPress }: { theme: PluginTheme; entry: AttentionEntry; now: number; onPress: () => void }) {
   const { colors } = theme;
-  const reason = reasonText({ phase: entry.phase, pending: entry.pending, pendingCount: entry.pendingCount, stop: entry.stop, lastError: entry.lastError, note: entry.note }, now);
+  const reason = reasonText({ phase: entry.phase, pending: entry.pending, pendingCount: entry.pendingCount, stop: entry.stop, lastError: entry.lastError, note: entry.note, issue: entry.issue }, now);
   return <Pressable accessibilityRole="button" accessibilityLabel={t("coreAttentionPopover.open", { value1: entry.title || t("coreAttentionPopover.untitledAgent"), value2: reason.text })} onPress={onPress}
     style={state => ({ flexDirection: "row", alignItems: "flex-start", gap: space.sm, padding: space.sm, borderRadius: radius.md,
       backgroundColor: state.pressed || (state as { hovered?: boolean }).hovered ? colors.surface1 : "transparent" })}>

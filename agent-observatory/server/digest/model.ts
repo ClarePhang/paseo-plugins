@@ -25,6 +25,8 @@ export interface CompactRow {
   seq: number; lastSeq: number; at: number; turnId: string | null; type: string; text?: string; messageId?: string;
   tool?: Partial<Omit<ToolFact, "turn" | "seq" | "lastSeq" | "start" | "end">> & { id: string };
   inferredSearch?: boolean;
+  /** A tool-call row that starts a turn: another agent's message or a schedule's prompt (Paseo 0.14); `text` is its body. */
+  trigger?: boolean;
   completed?: boolean;
   projected?: boolean;
   /** Estimated lower bound, recalculated from the compact window after each upsert. */

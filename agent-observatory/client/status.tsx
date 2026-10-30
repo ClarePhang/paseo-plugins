@@ -5,7 +5,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import type { AgentRecord } from "../shared/model";
 import type { TelemetryEvent } from "../shared/telemetry";
-import { clockLabel, sessionPhase, type SessionPhase } from "../shared/attention";
+import { clockLabel, loopText, sessionPhase, type SessionPhase } from "../shared/attention";
 import { aria, control, fontSize, hairline, hue as paletteHue, isDarkTheme, radius, relativeTime, space, withAlpha, type Hue as PaletteHue } from "./kit";
 import { Ping, Pop, Spin, useChangeCount } from "./motion";
 import { readLabel } from "./ui";
@@ -28,19 +28,21 @@ export const phases: Record<Phase, { label: string; hue: Hue; icon: string; hint
   quota: { get label() { return t("secondaryStatus.quotaExhausted"); }, hue: "orange", icon: "BatteryWarning", get hint() { return t("secondaryStatus.thisTurnStoppedDueToA"); } },
   silent: { get label() { return t("secondaryStatus.emptyTurn"); }, hue: "amber", icon: "CircleDashed", get hint() { return t("secondaryStatus.thisTurnEndedWithoutTextTool"); } },
   unfinished: { get label() { return t("secondaryStatus.unfinished"); }, hue: "amber", icon: "CircleDotDashed", get hint() { return t("secondaryStatus.thisTurnStoppedAfterATool"); } },
+  looping: { get label() { return t("secondaryStatus.looping"); }, hue: "orange", icon: "Repeat", get hint() { return t("secondaryStatus.loopingHint"); } },
+  stuck: { get label() { return t("secondaryStatus.stuck"); }, hue: "amber", icon: "Hourglass", get hint() { return t("secondaryStatus.stuckHint"); } },
   unread: { get label() { return t("secondaryStatus.unread"); }, hue: "pink", icon: "Mail", get hint() { return t("secondaryStatus.theAgentFinishedThisTurnBut"); } },
   idle: { get label() { return t("secondaryStatus.waitingForReply"); }, hue: "violet", icon: "MessageCircleMore", get hint() { return t("secondaryStatus.theAgentSLastReplyAsks"); } },
   done: { get label() { return t("secondaryStatus.completed"); }, hue: "green", icon: "Check", get hint() { return t("secondaryStatus.thisTurnIsCompleteAndYou"); } },
   snoozed: { get label() { return t("secondaryStatus.snoozed"); }, hue: "indigo", icon: "AlarmClock", get hint() { return t("secondaryStatus.theUnreadResultReminderIsSnoozed"); } },
   quiet: { get label() { return t("secondaryStatus.idle"); }, hue: "muted", icon: "CirclePause", get hint() { return t("secondaryStatus.theAgentStoppedButNoResult"); } },
-  closed: { get label() { return t("secondaryStatus.closed"); }, hue: "muted", icon: "CircleStop", get hint() { return t("secondaryStatus.theSessionIsClosed"); } },
+  closed: { get label() { return t("secondaryStatus.closed"); }, hue: "muted", icon: "Moon", get hint() { return t("secondaryStatus.theSessionIsClosed"); } },
   canceled: { get label() { return t("secondaryStatus.canceled"); }, hue: "muted", icon: "CircleSlash", get hint() { return t("secondaryStatus.thisTurnWasCanceled"); } },
 };
-export const phaseOrder: readonly Phase[] = ["running", "starting", "approval", "question", "plan", "error", "quota", "silent", "unfinished", "unread", "idle", "done", "snoozed", "quiet", "closed", "canceled"];
+export const phaseOrder: readonly Phase[] = ["running", "looping", "stuck", "starting", "approval", "question", "plan", "error", "quota", "silent", "unfinished", "unread", "idle", "done", "snoozed", "quiet", "closed", "canceled"];
 /** Phases that want attention or are working right now; they get weight and a tinted row. */
-export const activePhases: ReadonlySet<Phase> = new Set(["approval", "question", "plan", "error", "quota", "silent", "unfinished", "running", "starting", "unread", "idle"]);
+export const activePhases: ReadonlySet<Phase> = new Set(["approval", "question", "plan", "error", "quota", "silent", "unfinished", "looping", "stuck", "running", "starting", "unread", "idle"]);
 /** Loud phases: a solid pill and a tinted row. */
-export const loudPhases: ReadonlySet<Phase> = new Set(["approval", "question", "plan", "error", "quota", "unread"]);
+export const loudPhases: ReadonlySet<Phase> = new Set(["approval", "question", "plan", "error", "quota", "unread", "looping"]);
 
 /** A session's phase (shared/attention.ts `sessionPhase`: the rules 需要处理 and the sidebar badge use). */
 export function phaseOf(agent: AgentRecord, snoozed = false): Phase {
@@ -76,7 +78,7 @@ export function StatusGlyph({ theme, phase, size = 16, animate = true }: { theme
   if (phase === "running" || phase === "starting") return <View style={box}><Spinner size={size} color={color} slow={phase === "starting"} active={animate} /></View>;
   if (meta.hue === "muted") return <View style={box}><Icon name={meta.icon} size={size} color={theme.colors.foregroundMuted} /></View>;
   return <View style={box}>
-    {phase === "approval" || phase === "question" || phase === "plan" || phase === "unread" || phase === "quota" ? <Ping size={size} color={color} active={animate} /> : null}
+    {phase === "approval" || phase === "question" || phase === "plan" || phase === "unread" || phase === "quota" || phase === "looping" || phase === "stuck" ? <Ping size={size} color={color} active={animate} /> : null}
     <View style={{ width: size, height: size, borderRadius: size / 2, alignItems: "center", justifyContent: "center", backgroundColor: color }}>
       <Icon name={meta.icon} size={Math.round(size * 0.62)} color="#ffffff" />
     </View>
@@ -141,6 +143,7 @@ export function PhaseLine({ theme, agent, snoozed = false }: { theme: PluginThem
   const label = meta.label;
   const background = phase === "running" && !agent.activeTurnStartedAt ? agent.background : null;
   const detail: ReactNode = phase === "running" && agent.activeTurnStartedAt ? <LiveTimer since={agent.activeTurnStartedAt} color={text} prefix={t("secondaryStatus.runningFor")} size={fontSize.small} />
+    : (phase === "looping" || phase === "stuck") && agent.issue ? phase === "looping" ? loopText(agent.issue) : t("secondaryIssueCard.since", { time: clockLabel(agent.issue.since) })
     : background ? background.since ? <LiveTimer since={background.since} color={text} prefix={t("secondaryStatus.backgroundSubtasksRunningFor")} size={fontSize.small} /> : t("secondaryStatus.backgroundSubtasksRunning", { value1: background.running })
     : phase === "approval" && agent.pendingPermissionCount > 0 ? t("secondaryStatus.requestsNeedYou", { count: agent.pendingPermissionCount })
     : phase === "question" ? agent.pendingPermissionCount > 1 ? t("secondaryStatus.questionsAwaitYourAnswer", { count: agent.pendingPermissionCount }) : t("secondaryStatus.waitingForYourAnswer")

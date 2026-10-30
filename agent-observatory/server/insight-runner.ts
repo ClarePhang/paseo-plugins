@@ -116,7 +116,7 @@ export class InsightRunnerRegistry {
   private catalog(): Promise<Catalog> {
     const textKey = `${translator().language}:${translator().hash}`;
     if (!this.catalogCache || this.catalogCache.textKey !== textKey || this.now() - this.catalogCache.at >= this.cacheMs) {
-      const promise = catalogRequest(Promise.all([this.paseo.config.get(), this.paseo.providers.snapshot()])).then(([{ config }, snapshot]) => {
+      const promise = catalogRequest(Promise.all([this.paseo.config.get(), this.providerSnapshot()])).then(([{ config }, snapshot]) => {
         const entries = snapshot.entries.length ? snapshot.entries : (snapshot.compactSnapshot?.entries ?? []);
         return { profiles: (config.agentProfiles ?? []).filter(profile => validId(profile.id, 200)), entries: entries.filter(entry => validId(entry.provider, 120)).map(entry => {
           const compact = snapshot.compactSnapshot?.entries.find(candidate => candidate.provider === entry.provider);
@@ -130,6 +130,15 @@ export class InsightRunnerRegistry {
       this.catalogCache = { at: this.now(), promise, textKey };
     }
     return this.catalogCache.promise;
+  }
+  /**
+   * The providers as the daemon knows them. Right after it starts, discovery is lazy and entries still read `loading` with no
+   * modes, which would count as unusable for a minute (the cache): wait for discovery a little (2.18).
+   */
+  private async providerSnapshot(): Promise<Awaited<ReturnType<PaseoApi["providers"]["snapshot"]>>> {
+    const first = await this.paseo.providers.snapshot();
+    if (!first.entries.some(entry => entry.status === "loading") || typeof this.paseo.providers.waitForReady !== "function") return first;
+    return this.paseo.providers.waitForReady({ timeoutMs: 8_000 }).catch(() => first);
   }
   private binaryAvailable(): Promise<boolean> {
     if (!this.binaryCache || this.now() - this.binaryCache.at >= this.cacheMs) this.binaryCache = { at: this.now(), promise: this.findBinary().then(Boolean).catch(() => false) };
@@ -276,6 +285,10 @@ export async function runPaseoStructured<T>(options: PaseoStructuredRunOptions<T
     if (parent.archived) {
       if (!parent.workspaceId) throw new Error(WORKSPACE_ERROR);
       creation = paseo.workspaces.ref(parent.workspaceId).agents.create(common).catch(() => { throw new Error(WORKSPACE_ERROR); });
+    } else if (parent.workspaceId && parent.id) {
+      // In the analysed Agent's workspace, labelled as its sub-agent (2.18). Not with `parent`: on Paseo 0.13 a parent-created
+      // Agent's first prompt arrives wrapped as another Agent's message with XML entities, so the helper reads `&lt;` for `<`.
+      creation = paseo.workspaces.ref(parent.workspaceId).agents.create({ ...common, labels: { ...common.labels, "paseo.parent-agent-id": parent.id } });
     } else {
       if (!parent.id || !parent.cwd) throw new Error(WORKSPACE_ERROR);
       creation = paseo.agents.create({ ...common, cwd: parent.cwd, parent: parent.id });

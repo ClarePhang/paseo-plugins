@@ -8,6 +8,7 @@ import { normalizeLanguage } from "../shared/i18n";
 import { RECAP_LIMITS } from "../shared/recap";
 import type { AgentTimelineItem } from "./paseo-types";
 import { InsightReportError, parseInsightOutput, redactSecrets } from "./insight-analysis";
+import { isTurnStart, turnStartText, type TurnStartItem } from "../shared/turn-start";
 
 /** Exchanges (a user message and what followed it) a recap reads: this turn's and up to seven before it. */
 export const RECAP_EXCHANGES = 8;
@@ -33,18 +34,27 @@ export function maskedText(text: string): string {
   return text.length <= WHOLE_TEXT_MAX ? redactSecrets(text) : TOO_LONG;
 }
 
-/** Where the last `count` exchanges start: the count-th last user message with text, found from the end. */
+/**
+ * What opens an exchange: a user message, or another agent's message or a schedule's prompt (Paseo 0.14 records both as tool
+ * calls that start a turn); "" when the row opens none or has no text.
+ */
+function exchangeOpening(item: AgentTimelineItem): string {
+  return isTurnStart(item as TurnStartItem) ? turnStartText(item as TurnStartItem).trim() : "";
+}
+
+/** Where the last `count` exchanges start: the count-th last row that opens one with text, found from the end. */
 function tailStart(timeline: readonly AgentTimelineItem[], count: number): number {
   let seen = 0;
   for (let index = timeline.length - 1; index >= 0; index--) {
     const item = timeline[index];
-    if (item?.type === "user_message" && typeof item.text === "string" && item.text.trim() && ++seen === count) return index;
+    if (item && exchangeOpening(item) && ++seen === count) return index;
   }
   return 0;
 }
 
 /**
- * The visible text of the last `count` exchanges: user and assistant messages only. Tool calls and their output, reasoning,
+ * The visible text of the last `count` exchanges: what opened each (a user message, or another agent's message or a schedule's
+ * prompt) and the assistant messages after it. Other tool calls and their output, reasoning,
  * errors, notifications, todos, compaction markers and plugin rows are left out. Assistant text before the first user
  * message of the window is not part of any exchange. Every text is masked whole first, or left out above 256 KB.
  */
@@ -53,8 +63,8 @@ export function collectExchanges(timeline: readonly AgentTimelineItem[], count =
   let current: Exchange | null = null;
   for (let index = tailStart(timeline, count); index < timeline.length; index++) {
     const item = timeline[index]!;
-    if (item.type === "user_message") {
-      const text = typeof item.text === "string" ? item.text.trim() : "";
+    if (isTurnStart(item as TurnStartItem)) {
+      const text = exchangeOpening(item);
       if (!text) continue;
       current = { user: text, assistant: "" };
       exchanges.push(current);

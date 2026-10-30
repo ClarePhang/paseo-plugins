@@ -185,3 +185,14 @@ test("the server never serves a result cached for one turn for a heartbeat's nex
     assert.deepEqual([second.source.completionAt, second.source.roundEndedAt, second.latestReply.text], [r3, r3, "第二轮：发现一个失败用例"]);
   } finally { remove(); }
 });
+
+test("a schedule's prompt starts the latest turn (Paseo 0.14 records it as a tool call): its reply is current and it is no tool", async () => {
+  const head = [row(1, "user_message", "Watch the build")];
+  const heartbeat = { ...row(3, "tool_call", ""), item: { type: "tool_call", callId: "paseo-system:3f2a", name: "heartbeat", status: "completed", detail: { type: "plain_text", text: "Schedule \"nightly\" fired.\ncheck the build" } } };
+  const shell = { ...row(4, "tool_call", ""), item: { type: "tool_call", callId: "c1", name: "exec_command", status: "completed", detail: { type: "shell", command: "ls", exitCode: 0 } } };
+  const result = await fetchAgentResult(api(head, [...head, row(2, "assistant_message", "Watching"), heartbeat, shell, row(5, "assistant_message", "Build is green")]).value, "agent");
+  assert.equal(result.latestUserInput?.text, "Schedule \"nightly\" fired.\ncheck the build");
+  assert.equal(result.latestReply?.text, "Build is green");
+  assert.equal(result.metrics.tools, 1);
+  assert.equal(result.metrics.userTurns, 1);
+});

@@ -203,3 +203,15 @@ test("Paseo 0.13 windows: row positions keep keys stable between reads, and a tu
   assert.equal(long.metrics.toolCalls, 2);
   assert.equal(extractTurnContent([shell("x"), shell("y")], "msg:gone").metrics.toolCalls, 0, "a whole conversation without an anchor still counts nothing");
 });
+
+test("a schedule's prompt and another agent's message start a turn and are not counted as tools (Paseo 0.14)", () => {
+  const heartbeat = { type: "tool_call", callId: "paseo-system:3f2a", name: "heartbeat", status: "completed", error: null, detail: { type: "plain_text", text: "Schedule fired" } } as unknown as AgentTimelineItem;
+  const message = { type: "tool_call", callId: "paseo-agent-message:m1", name: "agent_message", status: "completed", error: null, detail: { type: "plain_text", text: "done" }, agentMessage: { event: "finished", sender: { id: "c" }, text: "done" } } as unknown as AgentTimelineItem;
+  const fresh = extractTurnContent([user("old"), assistant("old"), heartbeat, shell("s1"), assistant("checked")], null);
+  assert.equal(fresh.metrics.toolCalls, 1, "first sight starts at the heartbeat, which is no tool");
+  assert.equal(fresh.metrics.userMessages, 0);
+  assert.deepEqual(fresh.tools.map(item => item.name), ["shell"]);
+  const after = extractTurnContent([user("old"), assistant("old", "a1"), message, shell("s2"), assistant("ok")], "msg:a1");
+  assert.equal(after.metrics.toolCalls, 1);
+  assert.deepEqual(after.tools.map(item => item.name), ["shell"]);
+});

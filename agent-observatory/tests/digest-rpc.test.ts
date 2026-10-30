@@ -147,6 +147,8 @@ test("a running digest is polled on the revision clock's grain, and not at all i
   const { digestPollMs, useDigest } = await import("../client/use-digest");
   assert.equal(digestPollMs(true, true), ACTIVE_CLOCK_MS); assert.ok(ACTIVE_CLOCK_MS >= 20_000 && ACTIVE_CLOCK_MS <= 30_000);
   assert.equal(digestPollMs(true, false), 60_000); assert.equal(digestPollMs(false, true), false);
+  // A closed Agent is read once, not polled: each read loads it again (Paseo 0.14 closes idle Agents after an hour).
+  assert.equal(digestPollMs(true, false, true), false); assert.equal(digestPollMs(true, true, true), false);
   const client = new QueryClient();
   function Digest() { useDigest("a", true, true); return null; }
   renderToString(createElement(QueryClientProvider, { client }, createElement(Digest)));

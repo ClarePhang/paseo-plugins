@@ -57,6 +57,11 @@ describe("fold index rows", () => {
     expect(wireRowFromEntry(entry(10, message))).toMatchObject({ k: "b", w: "agent-message" });
     expect(claimsToolCall(message)).toBe(false);
     expect(claimsToolCall({ ...message, callId: "toolu_agent_message" })).toBe(true);
+    // Paseo 0.14 records a schedule or heartbeat prompt as a completed "heartbeat" call; the app starts a turn on it.
+    const heartbeat = call("heartbeat", { type: "plain_text", text: 'Schedule "nightly" fired (id=s1, run=r1).\n检查构建', icon: "sparkles" }, { callId: "paseo-system:3f2a" });
+    expect(wireRowFromEntry(entry(11, heartbeat))).toMatchObject({ k: "b", w: "heartbeat" });
+    expect(claimsToolCall(heartbeat)).toBe(false);
+    expect(claimsToolCall({ ...heartbeat, callId: "toolu_heartbeat" })).toBe(true);
   });
 
   it("mirrors how Paseo turns task-list tools into task rows or drops them", () => {

@@ -45,6 +45,14 @@ import { registerCacheClock } from "./server/cache-clock";
 import { providerBasesReader } from "./server/provider-bases";
 import { registerRecaps } from "./server/recap";
 
+/** How the host recorded the end of a closed Agent's last turn (its attention, kept after the close); null when it shows none. */
+async function closedTurnEnd(paseo: PaseoApi, agentId: string): Promise<{ at: string; outcome: "completed" | "failed" } | null> {
+  const agent = (await paseo.agents.ref(agentId).refresh().catch(() => null))?.agent as { attentionReason?: unknown; attentionTimestamp?: unknown } | undefined;
+  const at = typeof agent?.attentionTimestamp === "string" && Number.isFinite(Date.parse(agent.attentionTimestamp)) ? agent.attentionTimestamp : null;
+  if (!at) return null;
+  return agent?.attentionReason === "finished" ? { at, outcome: "completed" } : agent?.attentionReason === "error" ? { at, outcome: "failed" } : null;
+}
+
 export default function contribute(host: PluginServerContext) {
   const locales = createLocaleService(host, { pluginId: "agent-observatory", builtins: BUILTIN_CATALOGS });
   const telemetry = new TelemetryStore();
@@ -195,7 +203,10 @@ export default function contribute(host: PluginServerContext) {
     }),
     server.on("agent.archived", ({ agent }, { paseo }) => { background.tracker.markClosed(agent.id); observeWork(paseo, agent, () => telemetry.record({ type: "archived", agent })); }),
     // 0.11: the host closed (unloaded) the Agent. It is no longer loaded, and a turn still open will never end on its own.
-    server.on("agent.closed", ({ agent }, { paseo }) => { background.tracker.markClosed(agent.id); attention.closedAgent(agent.id); observeWork(paseo, agent, () => telemetry.record({ type: "closed", agent })); }),
+    // 0.14 closes an Agent after an hour idle, so the host's record of how its last turn ended is read first (refresh() loads nothing).
+    server.on("agent.closed", ({ agent }, { paseo }) => { background.tracker.markClosed(agent.id); attention.closedAgent(agent.id);
+      const closedAt = Date.now();
+      observeWork(paseo, agent, async () => telemetry.record({ type: "closed", agent, closedAt, ended: await closedTurnEnd(paseo, agent.id) })); }),
   ];
   // The backfill boundary is established before synchronous stats observation begins.
   void stats.ready.then(() => {

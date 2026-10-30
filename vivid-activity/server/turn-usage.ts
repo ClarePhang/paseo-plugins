@@ -105,6 +105,11 @@ export interface TurnUsageDeps {
   /** The Agent's record (`handle.refresh()`, which loads nothing); null when unavailable. */
   refresh(agentId: string): Promise<{ lastUsage?: unknown } | null>;
   feed: UsageFeed;
+  /**
+   * The name a turn id of the Agent's session now goes by (server/fold-index.ts `turnName`: a session loaded again reuses
+   * turn ids, so its turns get other names); the turn id by default. Figures are kept and reported by this name.
+   */
+  turnName?: (agentId: string, turnId: string) => string;
   setTimer?: (run: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
 }
@@ -123,6 +128,7 @@ export function createTurnUsage(deps: TurnUsageDeps) {
   const agents = new Map<string, AgentUsageState>();
   const setTimer = deps.setTimer ?? ((run: () => void, ms: number) => setTimeout(run, ms));
   const clearTimer = deps.clearTimer ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+  const nameOf = (agentId: string, turnId: string) => (deps.turnName ? deps.turnName(agentId, turnId) : turnId);
 
   function state(agentId: string): AgentUsageState {
     let found = agents.get(agentId);
@@ -179,11 +185,13 @@ export function createTurnUsage(deps: TurnUsageDeps) {
 
   return {
     /** `agent.turn_started` (every Agent). */
-    async turnStarted(agentId: string, provider: string, turnId: string | null): Promise<void> {
-      if (!agentId || !turnId) return;
+    async turnStarted(agentId: string, provider: string, startedId: string | null): Promise<void> {
+      if (!agentId || !startedId) return;
+      const turnId = nameOf(agentId, startedId);
       const entry = state(agentId);
       entry.lastStarted = turnId;
-      // A session loaded again counts its turn ids from the start again: figures kept for this id belong to an old turn.
+      // A session loaded again counts its turn ids from the start again: figures kept under this name belong to an old turn
+      // (one the plugin could not tell apart, as after it was reloaded).
       entry.done.delete(turnId);
       if (entry.current && entry.current.turn !== turnId) finish(agentId, entry.current);
       if (meterFor(await deps.base(provider).catch(() => null)) !== "request") return;
@@ -220,7 +228,7 @@ export function createTurnUsage(deps: TurnUsageDeps) {
     /** `agent.turn_ended`: the sum is final once the subscription says the Agent left the turn, or after a grace time. */
     turnEnded(agentId: string, turnId: string | null): void {
       const current = agents.get(agentId)?.current;
-      if (!current || !turnId || current.turn !== turnId || current.ending) return;
+      if (!current || !turnId || current.turn !== nameOf(agentId, turnId) || current.ending) return;
       current.ending = true;
       current.timer = setTimer(() => finish(agentId, current), REQUEST_END_GRACE_MS);
     },
@@ -233,8 +241,9 @@ export function createTurnUsage(deps: TurnUsageDeps) {
       const current = agents.get(agentId)?.current;
       if (!current) return;
       if (update?.kind === "upsert") {
-        if (update.agent?.activeTurn?.turnId !== current.turn) return;
-        const usage = rawUsage(update.agent.lastUsage);
+        const running = update.agent?.activeTurn?.turnId;
+        if (typeof running !== "string" || nameOf(agentId, running) !== current.turn) return;
+        const usage = rawUsage(update.agent?.lastUsage);
         if (usage) count(current, usage);
         return;
       }
@@ -249,14 +258,14 @@ export function createTurnUsage(deps: TurnUsageDeps) {
 
     /**
      * A fold index read: what the Agent's record said with the page (`payload.agent`). Returns the tokens to send for
-     * `turns` (the page's turns) plus the latest finished ones and a live sum.
+     * `turns` (the names of the page's turns) plus the latest finished ones and a live sum.
      */
     async observe(agentId: string, agent: { provider?: unknown; activeTurn?: { turnId?: unknown } | null; lastUsage?: unknown } | null | undefined, turns: readonly string[]): Promise<WireTurnTokens[] | undefined> {
       if (!agent) return undefined;
       const entry = agents.get(agentId);
       const provider = typeof agent.provider === "string" ? agent.provider : "";
       const meter = meterFor(await deps.base(provider).catch(() => null));
-      const running = typeof agent.activeTurn?.turnId === "string" && agent.activeTurn.turnId ? agent.activeTurn.turnId : null;
+      const running = typeof agent.activeTurn?.turnId === "string" && agent.activeTurn.turnId ? nameOf(agentId, agent.activeTurn.turnId) : null;
       if (meter === "turn") {
         const tracked = entry ?? state(agentId);
         if (running) {
@@ -279,6 +288,17 @@ export function createTurnUsage(deps: TurnUsageDeps) {
       return report(agentId, turns);
     },
 
+    /**
+     * The session closed (`agent.closed`; from Paseo 0.14 also after an hour idle): a turn still counted ends here, and the
+     * finished turns keep their figures for their rows (the next session's turns go by other names, `deps.turnName`).
+     */
+    closed(agentId: string): void {
+      const entry = agents.get(agentId);
+      if (entry?.current) finish(agentId, entry.current);
+      if (entry) entry.before = null;
+    },
+
+    /** The Agent was archived: nothing of it is shown live any more. */
     forget(agentId: string): void {
       const entry = agents.get(agentId);
       if (entry?.current) finish(agentId, entry.current);

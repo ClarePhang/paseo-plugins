@@ -20,6 +20,9 @@ export const attentionEntrySchema = z.object({
   // host closed the Agent while the turn was open (opus-F34).
   stop: z.object({ kind: z.enum(["quota", "silent", "unfinished"]), resetAt: z.iso.datetime().nullable(), resetGuessed: z.boolean(), closedMidTurn: z.boolean() }).nullable(),
   lastError: z.string().max(200).nullable(), note: z.string().max(200).nullable(),
+  /** 原地打转 / 可能卡住 (2.18): what the popover's reason line says; older servers send none. */
+  issue: z.object({ kind: z.enum(["looping", "stuck"]), pattern: z.enum(["same", "pingpong", "rotation", "contract"]).nullable(), tool: z.string().max(160).nullable(),
+    count: z.number().int().nonnegative(), toolRunning: z.boolean(), since: z.iso.datetime() }).nullable().default(null),
   /** What the latest reply invites (快捷回复, opus-B26): its category; null when nothing. */
   nudge: z.enum(REPLY_NUDGES).nullable(),
   /**

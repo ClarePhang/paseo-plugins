@@ -27,7 +27,11 @@ export const childSummaryRpc = defineRpc({
      * 0.9.1: offline: the child runs on another host this daemon cannot reach now.
      */
     status: z.enum(["ok", "missing", "closed", "unconfirmed", "offline"]),
-    agent: z.object({ status: z.string().max(30) }).nullable(),
+    /**
+     * 0.10: `waiting`: the child waits for an approval or asks a question (its pending requests); `error`: the first line of its
+     * error, masked, while it failed. Older servers send neither.
+     */
+    agent: z.object({ status: z.string().max(30), waiting: z.enum(["approval", "question"]).nullable().optional(), error: z.string().max(160).nullable().optional() }).nullable(),
     rows: z.array(childSummaryRowSchema).max(3),
     /** 0.9.1: the name of the other host the child runs on (Paseo 0.13 connected hosts); absent for a child on this host. */
     host: z.string().max(120).optional(),

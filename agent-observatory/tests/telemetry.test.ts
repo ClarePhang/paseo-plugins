@@ -550,6 +550,43 @@ test("a guessed reset is kept on both paths; a stop as stored never carries an a
   } finally { await f.dispose(); }
 });
 
+test("a close after an hour idle (Paseo 0.14) ends a turn whose end the hook missed, by the host's own record of it", async () => {
+  const f = await fixture();
+  try {
+    await f.store.record({ type: "turn_started", agent, turnId: "t1" });
+    f.advance(60 * 60_000);
+    const endedAt = new Date(epoch + 20_000).toISOString();
+    await f.store.record({ type: "closed", agent, ended: { at: endedAt, outcome: "completed" } });
+    const row = (await f.store.snapshot("agent-1")).agents[0]!;
+    assert.equal(row.stop, null, "no 可能未收尾 an hour later");
+    assert.equal(row.turnEndedAt, endedAt);
+    assert.equal(row.outcome, "completed");
+    assert.equal(row.completedTurns, 1);
+    // A record older than the open turn proves nothing about it: the close still marks it.
+    await f.store.record({ type: "turn_started", agent, turnId: "t2" });
+    f.advance(1_000);
+    await f.store.record({ type: "closed", agent, ended: { at: endedAt, outcome: "completed" } });
+    assert.equal((await f.store.snapshot("agent-1")).agents[0]!.stop?.closedMidTurn, true);
+  } finally { await f.dispose(); }
+});
+
+test("a close recorded after the Agent ran again leaves the new turn alone", async () => {
+  const f = await fixture();
+  try {
+    await f.store.record({ type: "turn_started", agent, turnId: "t1" });
+    await f.store.record({ type: "turn_ended", agent, turnId: "t1", outcome: "completed", asks: null });
+    const closedAt = epoch;
+    f.advance(1_000);
+    await f.store.record({ type: "turn_started", agent, turnId: "t2" });
+    await f.store.record({ type: "closed", agent, closedAt, ended: null });
+    const row = (await f.store.snapshot("agent-1")).agents[0]!;
+    assert.equal(row.stop, null);
+    assert.equal(row.turnEndedAt, null, "t2 is still running");
+    await f.store.record({ type: "turn_ended", agent, turnId: "t2", outcome: "completed", asks: null });
+    assert.equal((await f.store.snapshot("agent-1")).agents[0]!.completedTurns, 2);
+  } finally { await f.dispose(); }
+});
+
 test("a close mid-turn is marked as such and 知道了 on exactly that stop is saved; a new turn replaces it (opus-F34)", async () => {
   const f = await fixture();
   try {

@@ -313,6 +313,21 @@ describe("colorful activity timeline transforms", () => {
     expect(result).toBeUndefined();
   });
 
+  it("leaves Paseo 0.14's schedule and heartbeat prompt rows to Paseo, which starts a turn on them", () => {
+    const result = transformToolCall({
+      phase: "complete",
+      item: {
+        type: "tool_call",
+        callId: "paseo-system:3f2a",
+        name: "heartbeat",
+        detail: { type: "plain_text", text: 'Schedule "nightly" fired (id=s1, run=r1).\n检查构建', icon: "sparkles" },
+        status: "completed",
+        error: null,
+      } as never,
+    });
+    expect(result).toBeUndefined();
+  });
+
   it("preserves native speak tool calls with text input", () => {
     const result = transformToolCall({
       phase: "complete",

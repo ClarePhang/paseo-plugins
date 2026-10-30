@@ -81,8 +81,11 @@ export type TelemetryObservation =
   | { type: "turn_ended"; agent: ObservedAgent; turnId: string | null; outcome: TurnOutcome; asks?: boolean | null; nudge?: ReplyNudge | null; stop?: StopReason | null; link?: ChangeRequestLink | null }
   | { type: "permission_requested"; agent: ObservedAgent; requestId: string }
   | { type: "permission_resolved"; agent: ObservedAgent; requestId: string; allowed: boolean }
-  // The host closed the Agent (0.11 `agent.closed`): a turn still open then will never end on its own.
-  | { type: "closed"; agent: ObservedAgent };
+  // The host closed the Agent (0.11 `agent.closed`): a turn still open then will never end on its own. `ended`: how the host
+  // recorded the end of its last turn (its attention), read after the close; Paseo 0.14 closes an Agent after an hour idle,
+  // so a turn whose end this plugin missed had ended long before.
+  // `closedAt`: when the hook fired (ms), since `ended` is read before this is recorded and the Agent may run again meanwhile.
+  | { type: "closed"; agent: ObservedAgent; ended?: { at: string; outcome: "completed" | "failed" } | null; closedAt?: number };
 
 export interface TelemetryStoreOptions {
   /** Test overrides keep all writes inside a temporary directory. */
@@ -192,9 +195,16 @@ export class TelemetryStore {
       projectRootPath: observation.agent.projectRootPath };
     let metadata: TelemetryObservation;
     switch (observation.type) {
-      case "created": case "archived": case "closed":
+      case "created": case "archived":
         metadata = { type: observation.type, agent };
         break;
+      case "closed": {
+        // Only a time and an outcome of the host's record of the last turn's end, never anything else of it.
+        const ended = observation.ended && typeof observation.ended.at === "string" && Number.isFinite(Date.parse(observation.ended.at))
+          && (observation.ended.outcome === "completed" || observation.ended.outcome === "failed") ? { at: observation.ended.at, outcome: observation.ended.outcome } : null;
+        metadata = { type: observation.type, agent, ended, ...(typeof observation.closedAt === "number" && Number.isFinite(observation.closedAt) ? { closedAt: observation.closedAt } : {}) };
+        break;
+      }
       case "turn_started":
         metadata = { type: observation.type, agent, turnId: observation.turnId };
         break;
@@ -666,11 +676,26 @@ export class TelemetryStore {
         // (可能未收尾) instead of leaving it running forever. No event: closing is routine (idle sessions are unloaded).
         // The host raises no attention for it (only a turn that ends does), so it is marked `closedMidTurn`: only 知道了 here
         // marks it seen. A stop a backfill already read for this turn stands: that turn had ended, the hook only missed it.
+        // A turn that started after the close belongs to the session that resumed it: the close is old news.
+        const closedAt = observation.closedAt ?? at;
+        if (state.activeTurns.some(turn => turn.at > closedAt)) {
+          state.activeTurns = state.activeTurns.filter(turn => turn.at > closedAt);
+          this.markChanged(agent.id);
+          this.dirty = true;
+          this.scheduleWrite();
+          return;
+        }
         const open = state.activeTurns.length > 0 && state.summary.turnEndedAt === null;
+        // The host's own record of the turn's end, when it is no older than the turn: the hook only missed it.
+        const ended = observation.ended && Date.parse(observation.ended.at) >= Math.max(...state.activeTurns.map(turn => turn.at)) ? observation.ended : null;
         state.activeTurns = [];
         this.finishPermissionWait(state, at);
         state.pendingPermissions = [];
-        if (open && !state.summary.stop) state.summary.stop = { kind: "unfinished", resetAt: null, at: stamp, closedMidTurn: true };
+        if (open && ended) {
+          state.summary.turnEndedAt = new Date(Date.parse(ended.at)).toISOString();
+          state.summary.outcome = ended.outcome;
+          state.summary[ended.outcome === "completed" ? "completedTurns" : "failedTurns"] += 1;
+        } else if (open && !state.summary.stop) state.summary.stop = { kind: "unfinished", resetAt: null, at: stamp, closedMidTurn: true };
         this.markChanged(agent.id);
         this.dirty = true;
         this.scheduleWrite();

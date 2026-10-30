@@ -31,6 +31,23 @@ function fake(status: string | null = "running", archivedAt: string | null = nul
 }
 
 describe("compact child summaries", () => {
+  it("says when a child waits for you or failed, with common tokens masked (0.10)", async () => {
+    const context = (agent: Record<string, unknown>) => ({ paseo: { agents: { ref: () => ({
+      refresh: async () => ({ agent: { activeTurn: null, ...agent } }),
+      timeline: { refetch: async () => ({ entries: [] }) },
+    }) } } }) as unknown as PluginHandlerContext;
+    const approval = await handleChildSummary({ agentId: "c", statusOnly: true }, context({ status: "running", pendingPermissions: [{ id: "1", kind: "tool" }, { id: "2", kind: "question" }] }));
+    expect(approval.agent).toEqual({ status: "running", waiting: "approval" });
+    const question = await handleChildSummary({ agentId: "c", statusOnly: true }, context({ status: "running", pendingPermissions: [{ id: "1", kind: "question" }] }));
+    expect(question.agent?.waiting).toBe("question");
+    expect((await handleChildSummary({ agentId: "c", statusOnly: true }, context({ status: "running", pendingPermissions: [] }))).agent).toEqual({ status: "running" });
+    // Built at runtime: a literal token-shaped string would trip secret scanners on the published source.
+    const token = `${"sk"}-${"a1".repeat(12)}`;
+    const failed = await handleChildSummary({ agentId: "c", manual: true }, context({ status: "error", lastError: `401 Unauthorized ${token}\n    at fetch (x.js:1:1)` }));
+    expect(failed.agent?.error).toBe("401 Unauthorized [redacted]");
+    expect(childSummaryRpc.output.parse(failed)).toEqual(failed);
+  });
+
   it("returns only the three newest previews, with UTF-8 byte caps instead of full output or agent records", async () => {
     const { context, calls } = fake();
     const output = await handleChildSummary({ agentId: "child" }, context);
@@ -53,6 +70,18 @@ describe("compact child summaries", () => {
     expect(output.rows).toHaveLength(3);
     expect(Buffer.byteLength(JSON.stringify(output))).toBeLessThanOrEqual(500);
     expect(output.rows.every((row) => row.s === "running" && row.i && row.t)).toBe(true);
+  });
+
+  it("a failed child's long error line doesn't take the rows' room", async () => {
+    const context = (lastError: string | null) => ({ paseo: { agents: { ref: () => ({
+      refresh: async () => ({ agent: { status: lastError ? "error" : "running", activeTurn: null, lastError } }),
+      timeline: { refetch: async () => ({ entries: Array.from({ length: 3 }, (_, n) => ({ seqStart: n, seqEnd: n,
+        item: { type: "tool_call", callId: `t-${n}`, name: "Bash", status: "completed", detail: { type: "shell", command: `npm run build:${n}`, output: "构建输出".repeat(40) } } })) }) },
+    }) } } }) as unknown as PluginHandlerContext;
+    const plain = await handleChildSummary({ agentId: "child", manual: true }, context(null));
+    const failed = await handleChildSummary({ agentId: "child", manual: true }, context("构建失败：找不到模块，请检查依赖是否安装完整".repeat(5)));
+    expect(failed.agent?.error).toBeTruthy();
+    expect(failed.rows).toEqual(plain.rows);
   });
 
   it("does not load closed, archived, missing or provider children automatically", async () => {

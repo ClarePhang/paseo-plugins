@@ -90,6 +90,9 @@ export function createTimelineStore(transport: TimelineTransport, options: { clo
     viewState: { scrollOffset: 0, filter: "all", followTail: true } };
   const listeners = new Set<() => void>();
   let owners = 0, revision = 0, lastFetch = -Infinity, lastEvent = -Infinity, dirty = false, authoritative = false, promptly = false, disposed = false;
+  // Off while the Agent is closed (not loaded): reading its timeline would load it again, and Paseo 0.14 closes an idle
+  // Agent after an hour, so a fallback poll would load and release it over and over. Live events and asked-for reads stay.
+  let polling = true;
   let cachedBytes = 0;
   let subscriptionVersion = 0;
   let fetching: Promise<void> | null = null, unsubscribe: (() => void) | null = null;
@@ -103,7 +106,7 @@ export function createTimelineStore(transport: TimelineTransport, options: { clo
     for (const listener of listeners) listener(); options.onChange?.();
   }
   function clearTimers() { if (dirtyTimer !== null) clock.clearTimeout(dirtyTimer); if (pollTimer !== null) clock.clearTimeout(pollTimer); if (resubscribeTimer !== null) clock.clearTimeout(resubscribeTimer); dirtyTimer = pollTimer = resubscribeTimer = null; }
-  function schedulePoll() { if (pollTimer !== null) clock.clearTimeout(pollTimer); if (!owners || disposed) return; pollTimer = clock.setTimeout(() => { pollTimer = null; dirty = true; scheduleDirty(); }, fallback); }
+  function schedulePoll() { if (pollTimer !== null) clock.clearTimeout(pollTimer); pollTimer = null; if (!owners || disposed || !polling) return; pollTimer = clock.setTimeout(() => { pollTimer = null; dirty = true; scheduleDirty(); }, fallback); }
   const dueAt = () => authoritative || promptly ? lastFetch + minimum : Math.max(lastFetch + minimum, Math.min(lastFetch + busy, lastEvent + quiet));
   function scheduleDirty() {
     if (!owners || disposed || !dirty || dirtyTimer !== null || fetching) return;
@@ -185,12 +188,12 @@ export function createTimelineStore(transport: TimelineTransport, options: { clo
     unsubscribe?.(); unsubscribe = null;
     const delay = RESUBSCRIBE_DELAYS[Math.min(resubscribes, RESUBSCRIBE_DELAYS.length - 1)];
     resubscribes += 1;
-    resubscribeTimer = clock.setTimeout(() => { resubscribeTimer = null; subscribeLive(); dirty = true; scheduleDirty(); }, delay);
+    resubscribeTimer = clock.setTimeout(() => { resubscribeTimer = null; subscribeLive(); if (polling) { dirty = true; scheduleDirty(); } }, delay);
   }
   function handleEvent(update: unknown, failed: (error: unknown) => void) {
     const payload = object(update), event = object(payload.event);
     // The SDK has released this observation; establish a new one and keep polling meanwhile.
-    if (event.type === "error") { failed(typeof event.error === "string" ? event.error : t("secondaryTimelineStore.liveConnectionInterrupted")); dirty = true; scheduleDirty(); return; }
+    if (event.type === "error") { failed(typeof event.error === "string" ? event.error : t("secondaryTimelineStore.liveConnectionInterrupted")); if (polling) { dirty = true; scheduleDirty(); } return; }
     // Live delivery resumed after a reconnect; events in between were not replayed.
     if (event.type === "subscription_restored") { publish({ live: true, error: null }); dirty = authoritative = true; rescheduleDirty(); return; }
     if (event.type === "replacement") { revision++; authoritative = true; publish({ page: null, loading: true, viewState: { ...state.viewState, scrollOffset: 0 } }); }
@@ -222,6 +225,13 @@ export function createTimelineStore(transport: TimelineTransport, options: { clo
     },
     refresh: () => read("full"),
     loadOlder: () => read("older"),
+    /** Whether to poll as a fallback to live events (off while the Agent is closed); turning it on reads what was missed. */
+    setPolling(on: boolean) {
+      if (polling === on) return;
+      polling = on;
+      if (!on) { if (pollTimer !== null) clock.clearTimeout(pollTimer); pollTimer = null; return; }
+      if (owners && !disposed) { dirty = true; scheduleDirty(); schedulePoll(); }
+    },
     setViewState(patch: Partial<TimelineViewState>) {
       const scrollOffset = patch.scrollOffset === undefined ? state.viewState.scrollOffset : Math.max(0, Number.isFinite(patch.scrollOffset) ? patch.scrollOffset : 0);
       if (scrollOffset === state.viewState.scrollOffset && (patch.filter === undefined || patch.filter === state.viewState.filter) && (patch.followTail === undefined || patch.followTail === state.viewState.followTail)) return;

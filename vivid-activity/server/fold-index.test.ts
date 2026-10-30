@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import contribute from "../index.server";
-import { forgetAgentTurns, forgetTurnStarts, handleFoldIndex, knownTurnStart, noteTurnStarted, turnMemoSize } from "./fold-index";
+import { forgetAgentTurns, forgetTurnStarts, handleFoldIndex, knownTurnStart, noteAgentClosed, noteTurnStarted, turnMemoSize, turnName } from "./fold-index";
 
 function context(refetch: (options: unknown) => Promise<unknown>, calls: unknown[] = []): PluginHandlerContext {
   return {
@@ -159,7 +159,7 @@ describe("turn starts of closed Agents (0.5.0)", () => {
     forgetTurnStarts();
   });
 
-  it("listens to agent.closed and stops listening when the plugin unloads", () => {
+  it("keeps the turns when the session closes, forgets them when the Agent is archived, and stops listening on unload", () => {
     forgetTurnStarts();
     const handlers = new Map<string, (event: unknown) => void>();
     const removed: string[] = [];
@@ -174,9 +174,76 @@ describe("turn starts of closed Agents (0.5.0)", () => {
     const stop = contribute(server as never);
     handlers.get("agent.turn_started")!({ agent: { id: "agent-z" }, turnId: "foreground-turn-1" });
     expect(knownTurnStart("agent-z", "foreground-turn-1")).not.toBeNull();
+    // Paseo 0.14 closes an idle session after an hour: the turn keeps its start, and the next session's turns get new names.
     handlers.get("agent.closed")!({ agent: { id: "agent-z" } });
+    expect(knownTurnStart("agent-z", "foreground-turn-1")).not.toBeNull();
+    expect(turnName("agent-z", "foreground-turn-1")).toBe("foreground-turn-1#1");
+    handlers.get("agent.archived")!({ agent: { id: "agent-z" }, archivedAt: "2026-10-29T10:00:00.000Z" });
     expect(knownTurnStart("agent-z", "foreground-turn-1")).toBeNull();
+    expect(turnName("agent-z", "foreground-turn-1")).toBe("foreground-turn-1");
     stop();
-    expect(removed.sort()).toEqual(["agent.closed", "agent.turn_ended", "agent.turn_started"]);
+    expect(removed.sort()).toEqual(["agent.archived", "agent.closed", "agent.turn_ended", "agent.turn_started"]);
+    forgetTurnStarts();
+  });
+});
+
+describe("sessions loaded again (0.10.0-local.3)", () => {
+  const at = (time: string) => `2026-10-29T${time}.000Z`;
+  const ms = (time: string) => Date.parse(at(time));
+  const row = (seq: number, time: string, turnId: string, item: Record<string, unknown> = { type: "reasoning", text: `r${seq}` }) => ({
+    provider: "claude", item, timestamp: at(time), seqStart: seq, seqEnd: seq, turnId,
+  });
+
+  it("names a reused turn id after its generation, by when each row was written", async () => {
+    forgetTurnStarts();
+    noteTurnStarted("a1", "foreground-turn-1", ms("08:00:00"));
+    noteTurnStarted("a1", "foreground-turn-2", ms("08:10:00"));
+    // Released after an hour idle, loaded again for a new message: its ids start from 1 again.
+    noteAgentClosed("a1", ms("09:15:00"));
+    noteTurnStarted("a1", "foreground-turn-1", ms("10:00:00"));
+    expect(turnName("a1", "foreground-turn-1", ms("08:00:05"))).toBe("foreground-turn-1");
+    expect(turnName("a1", "foreground-turn-1", ms("10:00:05"))).toBe("foreground-turn-1#1");
+    expect(turnName("a1", "foreground-turn-1")).toBe("foreground-turn-1#1");
+    expect(knownTurnStart("a1", "foreground-turn-1")).toBe(ms("08:00:00"));
+    expect(knownTurnStart("a1", "foreground-turn-1#1")).toBe(ms("10:00:00"));
+    // Another Agent is not affected.
+    expect(turnName("a2", "foreground-turn-1")).toBe("foreground-turn-1");
+
+    const page = {
+      ...payload,
+      entries: [
+        row(1, "08:00:01", "foreground-turn-1", { type: "user_message", text: "first" }),
+        row(2, "08:00:30", "foreground-turn-1"),
+        row(3, "08:10:01", "foreground-turn-2"),
+        row(4, "10:00:01", "foreground-turn-1", { type: "user_message", text: "again" }),
+        row(5, "10:00:20", "foreground-turn-1"),
+      ],
+      agent: { status: "running", activeTurn: { turnId: "foreground-turn-1", startedAt: at("10:00:00") } },
+    };
+    const out = await handleFoldIndex({ agentId: "a1", direction: "tail" }, context(async () => page));
+    expect(out.turns).toEqual([
+      { id: "foreground-turn-1", at: ms("08:00:00") },
+      { id: "foreground-turn-2", at: ms("08:10:00") },
+      { id: "foreground-turn-1#1", at: ms("10:00:00") },
+    ]);
+    expect(out.rows.map((entry) => entry.u)).toEqual([0, 0, 1, 2, 2]);
+    expect(out.active).toEqual({ id: "foreground-turn-1#1", at: ms("10:00:00") });
+    forgetTurnStarts();
+  });
+
+  it("learns a running turn's start into its own generation, and keeps counting when old closes are let go", () => {
+    forgetTurnStarts();
+    noteAgentClosed("a3", 1_000);
+    noteTurnStarted("a3", "codex-turn-1", 2_000);
+    expect(knownTurnStart("a3", "codex-turn-1#1")).toBe(2_000);
+    expect(knownTurnStart("a3", "codex-turn-1")).toBeNull();
+    for (let close = 1; close <= 120; close++) noteAgentClosed("a3", 10_000 + close);
+    expect(turnName("a3", "t")).toBe("t#121");
+    // Rows older than the closes still kept are counted from the oldest one kept.
+    expect(turnName("a3", "t", 5_000)).toBe("t#21");
+    forgetAgentTurns("a3");
+    expect(turnName("a3", "t")).toBe("t");
+    expect(knownTurnStart("a3", "codex-turn-1#1")).toBeNull();
+    forgetTurnStarts();
   });
 });
