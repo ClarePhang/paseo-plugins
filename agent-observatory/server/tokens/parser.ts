@@ -150,7 +150,10 @@ export function parseGrokUsage(content: string, file: LogFile, sink: CallSink): 
 /**
  * OpenCode (2.18), one assistant message from either backend, counted the way OpenCode totals it: the `tokens` of the
  * message's `data` (a database row's JSON, or a legacy storage file), the response time from `time.created` to
- * `time.completed`; `reasoning` is its own counter there, not part of the output. A message still streaming has no
+ * `time.completed`; modern OpenCode (1.19) stores visible output and reasoning separately, so output includes their
+ * sum in our ledger. Older formats with reasoning already inside output cannot be distinguished reliably.
+ * https://github.com/anomalyco/opencode/blob/v1.19.4/packages/opencode/src/session/session.ts#L368-L372
+ * A message still streaming has no
  * completed time and is not a call yet; an all-zero one (aborted) never is. A message is keyed by its id — the same
  * one a legacy file and its migrated database row carry, so both backends count it once. A session with a parent
  * (`session.parent_id`) is a sub-agent's.
@@ -159,7 +162,8 @@ export function parseOpendencodeMessage(message: ObjectValue, file: LogFile, sin
   const time = object(message.time), at = stamp(time.completed), start = stamp(time.created);
   if (at === null) return;
   const tokens = object(message.tokens), cache = object(tokens.cache);
-  const input = count(tokens.input), cacheWrite = count(cache.write), cacheRead = count(cache.read), output = count(tokens.output);
+  const input = count(tokens.input), cacheWrite = count(cache.write), cacheRead = count(cache.read);
+  const reasoning = count(tokens.reasoning), output = count(tokens.output) + reasoning;
   if (!input && !cacheWrite && !cacheRead && !output) return;
   const id = text(message.id, 256);
   if (!id) return;
@@ -170,7 +174,7 @@ export function parseOpendencodeMessage(message: ObjectValue, file: LogFile, sin
   if (cwd) state.cwd = cwd;
   const call: LedgerCall = { key: callKey([file.source, id]), source: file.source, sessionId: state.sessionId, cwd: state.cwd,
     model: text(message.modelID, 240) || null, at, start: validStart(start, at), input, cacheWrite, cacheRead, output,
-    reasoning: count(tokens.reasoning), subagent };
+    reasoning, subagent };
   emit(file, { call, forked: false }, start, sink);
 }
 
@@ -264,22 +268,25 @@ function parseCodebuddyLine(line: string, file: LogFile, sink: CallSink): void {
 }
 
 /**
- * Gemini CLI (2.18), the JSONL chat records of the windowed generation: the first row names the session, `$set` rows
- * carry the window's messages, and a `gemini` message counts the tokens its response used — the cached part comes out
- * of the prompt, thoughts are their own counter, and there is no response time. A message is keyed by its id, so a
+ * Gemini CLI (2.18), the JSONL chat records: the first row names the session, individual `gemini` message rows carry
+ * usage, and older `$set` rows can carry a window of messages. The cached part comes out of the prompt; thoughts
+ * join output (and remain its reasoning subset), tool-use prompt tokens join input. There is no response time.
+ * https://github.com/google-gemini/gemini-cli/blob/v0.65.0/packages/core/src/services/chatRecordingService.ts
+ * A message is keyed by its id, so a
  * window that re-emits it while it is still the latest call corrects instead of counting again; once later messages
  * have passed it, a re-emission is dropped as the duplicate it is. The older single-JSON records carry no per-message
  * tokens and are never logs here. (A single row over the reader's 16 MiB line cap is skipped whole: an extreme window
  * with a large attachment inlined.)
  */
 function parseGeminiLine(lineText: string, file: LogFile, sink: CallSink): void {
-  if (!/"(?:\$set|sessionId)"/.test(lineText)) return;
+  if (!/"(?:\$set|sessionId)"|"type"\s*:\s*"gemini"/.test(lineText)) return;
   let row: ObjectValue;
   try { row = object(JSON.parse(lineText)); } catch { return; }
   const state = file.state;
-  const session = text(row.sessionId, 256);
+  const update = object(row.$set);
+  const session = text(row.sessionId, 256) || text(update.sessionId, 256);
   if (session) { state.sessionId = session; remember(state.sessions, session); }
-  const window = object(row.$set).messages;
+  const window = row.type === "gemini" ? [row] : update.messages;
   if (!Array.isArray(window)) return;
   for (const entry of window.slice(-2_000)) {
     const message = object(entry);
@@ -289,13 +296,14 @@ function parseGeminiLine(lineText: string, file: LogFile, sink: CallSink): void 
     const id = text(message.id, 256);
     if (at === null || !id) continue;
     const prompt = count(tokens.input), cacheRead = Math.min(prompt, count(tokens.cached));
-    const output = count(tokens.output);
-    const input = Math.max(0, prompt - cacheRead);
+    // Gemini's totalTokenCount sums prompt + candidates + thoughts + tool-use prompt tokens.
+    const reasoning = count(tokens.thoughts), output = count(tokens.output) + reasoning;
+    const input = Math.max(0, prompt - cacheRead) + count(tokens.tool);
     if (!input && !cacheRead && !output) continue;
     const model = text(message.model, 240) || state.model;
     state.model = model;
     const call: LedgerCall = { key: callKey(["gemini", id]), source: "gemini", sessionId: state.sessionId, cwd: state.cwd,
-      model, at, start: null, input, cacheWrite: 0, cacheRead, output, reasoning: Math.min(output, count(tokens.thoughts)), subagent: false };
+      model, at, start: null, input, cacheWrite: 0, cacheRead, output, reasoning, subagent: false };
     emit(file, { call, forked: false }, null, sink);
   }
 }
