@@ -74,3 +74,27 @@ test("axis ticks land on round local clock times", () => {
   assert.equal(swimTicks(now, 6 * 3_600_000, offset).length, 7);
   assert.deepEqual(swimTicks(now, 24 * 3_600_000, offset).map(tick => new Date(tick + offset * 60_000).getUTCHours()), [20, 0, 4, 8, 12, 16, 20]);
 });
+
+test("a live Agent whose subagents still work draws one subagent bar that is not a turn", () => {
+  const events = [event("p", "turn_started", 50), event("p", "turn_completed", 40)];
+  const running = new Map<string, "running" | "waiting">([["p", "running"]]);
+  // Subagents started 12 minutes ago, after the turn completed; the span reaches now.
+  const subs = new Map([["p", at(12)]]);
+  const { lanes, turns, peak } = buildSwimlanes(events, running, now, 3_600_000, 10, undefined, subs);
+  const lane = lanes.find(lane => lane.agentId === "p")!;
+  assert.deepEqual(lane.spans, [
+    { start: now - 50 * 60_000, end: now - 40 * 60_000, kind: "completed", open: false },
+    { start: now - 12 * 60_000, end: now, kind: "running", open: true, subs: true },
+  ]);
+  // The subagent bar is work in parallel, not a turn: the turn count keeps excluding it while the peak counts it.
+  assert.equal(turns, 1);
+  assert.equal(peak, 1);
+  // Without the directory's running status a stale tracker entry draws no subagent bar; the finished turn still shows.
+  const stale = buildSwimlanes(events, noneLive, now, 3_600_000, 10, undefined, subs).lanes.find(lane => lane.agentId === "p")!;
+  assert.deepEqual(stale.spans, [{ start: now - 50 * 60_000, end: now - 40 * 60_000, kind: "completed", open: false }]);
+  // An open turn keeps its own bar; the subagent start adds nothing beside it.
+  const open = [event("q", "turn_started", 30)];
+  const openLive = new Map<string, "running" | "waiting">([["q", "running"]]);
+  const openLane = buildSwimlanes(open, openLive, now, 3_600_000, 10, undefined, subs).lanes.find(lane => lane.agentId === "q")!;
+  assert.deepEqual(openLane.spans, [{ start: now - 30 * 60_000, end: now, kind: "running", open: true }]);
+});

@@ -30,8 +30,10 @@ export const Swimlane = memo(function Swimlane({ theme, events, agents, now, com
   const [width, setWidth] = useState(0);
   const live = useMemo(() => { const result = new Map<string, "running" | "waiting">(); for (const agent of agents) if (agent.status === "running" || agent.status === "waiting") result.set(agent.id, agent.status); return result; }, [agents]);
   const titles = useMemo(() => new Map(agents.map(agent => [agent.id, agent.title] as const)), [agents]);
+  // Provider subagents still working after the Agent's own turn ended (the tracker folds them into the record).
+  const subs = useMemo(() => new Map(agents.filter(agent => (agent.background?.running ?? 0) > 0 && agent.background?.since).map(agent => [agent.id, agent.background!.since!] as const)), [agents]);
   const windowMs = windows[range];
-  const { lanes, peak, peakAt, turns, hidden } = useMemo(() => buildSwimlanes(events, live, now, windowMs, compact ? 6 : 8, titles), [events, live, now, windowMs, compact, titles]);
+  const { lanes, peak, peakAt, turns, hidden } = useMemo(() => buildSwimlanes(events, live, now, windowMs, compact ? 6 : 8, titles, subs), [events, live, now, windowMs, compact, titles, subs]);
   const labelWidth = compact ? 88 : 150, track = Math.max(0, width - labelWidth - space.sm), from = now - windowMs;
   const x = (at: number) => (at - from) / windowMs * track;
   const ticks = swimTicks(now, windowMs, -new Date(now).getTimezoneOffset());

@@ -14885,7 +14885,7 @@ var ends = { turn_completed: "completed", turn_failed: "failed", turn_canceled: 
 function eventAgentTitle(event, titles2) {
   return titles2?.get(event.agentId) || event.agentTitle;
 }
-function buildSwimlanes(events, live2, now, windowMs, limit, titles2) {
+function buildSwimlanes(events, live2, now, windowMs, limit, titles2, subs) {
   const from = now - windowMs;
   const byAgent = /* @__PURE__ */ new Map();
   const sorted = [...events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
@@ -14910,6 +14910,13 @@ function buildSwimlanes(events, live2, now, windowMs, limit, titles2) {
   for (const [agentId, state] of byAgent) {
     const status = live2.get(agentId);
     if (state.turn !== void 0 && status) state.spans.push({ start: state.turn, end: now, kind: "running", open: true });
+    else {
+      const subsSince = state.turn === void 0 && status === "running" ? subs?.get(agentId) : void 0;
+      if (subsSince) {
+        const startedAt = Date.parse(subsSince);
+        if (Number.isFinite(startedAt)) state.spans.push({ start: startedAt, end: now, kind: "running", open: true, subs: true });
+      }
+    }
     if (state.approval !== void 0 && status === "waiting") state.spans.push({ start: state.approval, end: now, kind: "approval", open: true });
     const spans = state.spans.filter((span) => span.end >= from && span.start <= now).map((span) => ({ ...span, start: Math.max(from, span.start), end: Math.min(now, Math.max(span.start, span.end)) }));
     if (spans.length) lanes.push({ agentId, title: state.title || agentId, spans, lastAt: Math.max(...spans.map((span) => span.end)) });
@@ -14923,7 +14930,7 @@ function buildSwimlanes(events, live2, now, windowMs, limit, titles2) {
       peakAt = at2;
     }
   }
-  const turns = lanes.reduce((sum, lane) => sum + lane.spans.filter((span) => span.kind !== "approval").length, 0);
+  const turns = lanes.reduce((sum, lane) => sum + lane.spans.filter((span) => span.kind !== "approval" && !span.subs).length, 0);
   const shown = [...lanes].sort((a, b) => b.lastAt - a.lastAt).slice(0, limit).sort((a, b) => Math.min(...a.spans.map((span) => span.start)) - Math.min(...b.spans.map((span) => span.start)) || a.agentId.localeCompare(b.agentId));
   return { lanes: shown, peak, peakAt, turns, hidden: lanes.length - shown.length };
 }
@@ -14968,8 +14975,9 @@ var Swimlane = (0, import_react43.memo)(function Swimlane2({ theme, events, agen
     return result;
   }, [agents]);
   const titles2 = (0, import_react43.useMemo)(() => new Map(agents.map((agent) => [agent.id, agent.title])), [agents]);
+  const subs = (0, import_react43.useMemo)(() => new Map(agents.filter((agent) => (agent.background?.running ?? 0) > 0 && agent.background?.since).map((agent) => [agent.id, agent.background.since])), [agents]);
   const windowMs = windows[range];
-  const { lanes, peak, peakAt, turns, hidden } = (0, import_react43.useMemo)(() => buildSwimlanes(events, live2, now, windowMs, compact ? 6 : 8, titles2), [events, live2, now, windowMs, compact, titles2]);
+  const { lanes, peak, peakAt, turns, hidden } = (0, import_react43.useMemo)(() => buildSwimlanes(events, live2, now, windowMs, compact ? 6 : 8, titles2, subs), [events, live2, now, windowMs, compact, titles2, subs]);
   const labelWidth = compact ? 88 : 150, track = Math.max(0, width - labelWidth - space.sm), from = now - windowMs;
   const x = (at2) => (at2 - from) / windowMs * track;
   const ticks = swimTicks(now, windowMs, -new Date(now).getTimezoneOffset());

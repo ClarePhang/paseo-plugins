@@ -4,6 +4,7 @@
 
 **The event stream names Agents from the directory**
 - The 并行泳道 and the event list now show each Agent's current directory name instead of the title frozen into the recorded event. Interactive Agents record their first events before the host has generated their title, so those events kept the 「未命名 Agent」 placeholder forever even after the name existed; the swimlane lanes, the feed rows and their accessibility labels resolve the name from the Agent directory first and fall back to the stored title, which also renames past events retroactively. Agents no longer in the directory keep their stored title.
+- The 并行泳道 also shows provider subagents that keep working after the Agent's own turn ended: while the directory counts the Agent as running with "N working", the lane draws a running bar from the earliest observed subagent start, so a parent waiting on background subtasks no longer disappears from the lanes the moment its turn completes. The bar is work in parallel — it moves the concurrency peak but is not counted as a turn.
 
 **The event page says what the filters hide**
 - The event stream inherits the session list's scope filters, and when they hid events the page simply looked empty — indistinguishable from a broken capture. When the current filters hide retained events inside the selected time range, the page now shows a count ("当前筛选隐藏了 N 条事件") with a one-tap 清除筛选 that resets the status, read-state, attention and session-scope filters; it renders nothing when everything is visible.
