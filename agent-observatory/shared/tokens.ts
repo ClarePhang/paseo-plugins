@@ -24,6 +24,8 @@ import { STATS_RANGES, statsTimeZoneSchema } from "./stats";
  * - Pi (2.14): `$PI_CODING_AGENT_SESSION_DIR`, else `$PI_CODING_AGENT_DIR/sessions` (`~/.pi/agent/sessions`),
  *   `--<cwd>--/<time>_<session>.jsonl`, counted as Pi totals a session: assistant messages, tool results that carry
  *   usage, and compaction / branch summaries; deduplicated by response id (a `/fork` or `/clone` copies messages).
+ * - Kimi Code: `$KIMI_CODE_HOME/sessions/<cwd>/<session>/agents/<agent>/wire.jsonl` (default `~/.kimi-code`).
+ * - ZCode: `$ZCODE_HOME/cli/db/db.sqlite`, read-only completed steps including WAL (default `~/.zcode`).
  * The directories are the standard ones plus any a custom provider sets in its config or launcher (server/tokens/roots).
  * Everything on the host is counted (not only Paseo-started sessions); sessions are matched to Paseo agents through
  * `persistence.sessionId`. Only counters, model names, working directories and session ids are retained — never
@@ -44,9 +46,9 @@ const iso = z.iso.datetime();
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const rate = z.number().nonnegative().finite();
 
-export const TOKEN_SOURCES = ["claude", "codex", "grok", "pi"] as const;
+export const TOKEN_SOURCES = ["claude", "codex", "grok", "pi", "kimi", "zcode"] as const;
 export type TokenSource = typeof TOKEN_SOURCES[number];
-export const tokenSourceNames: Record<TokenSource, string> = { claude: "Claude Code", codex: "Codex", grok: "Grok CLI", pi: "Pi" };
+export const tokenSourceNames: Record<TokenSource, string> = { claude: "Claude Code", codex: "Codex", grok: "Grok CLI", pi: "Pi", kimi: "Kimi Code", zcode: "ZCode" };
 /** Provider breakdown row of the sessions no Paseo agent matches (run in a terminal, or the agent was deleted). */
 export const TOKEN_UNMATCHED = "__unmatched__";
 /** Log roots watched at once: the standard ones plus custom providers' config directories (server/tokens/roots). */

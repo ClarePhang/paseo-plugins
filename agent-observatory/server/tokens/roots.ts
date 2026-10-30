@@ -28,6 +28,8 @@ const CONFIG_ENV: Record<TokenSource, ReadonlyArray<{ name: string; folders: rea
   claude: [{ name: "CLAUDE_CONFIG_DIR", folders: ["projects"], standard: home => join(home, ".claude") }],
   codex: [{ name: "CODEX_HOME", folders: ["sessions", "archived_sessions"], standard: home => join(home, ".codex") }],
   grok: [{ name: "GROK_HOME", folders: ["sessions"], standard: home => join(home, ".grok") }],
+  kimi: [{ name: "KIMI_CODE_HOME", folders: ["sessions"], standard: home => join(home, ".kimi-code") }],
+  zcode: [{ name: "ZCODE_HOME", folders: ["cli/db"], standard: home => join(home, ".zcode") }],
   pi: [{ name: "PI_CODING_AGENT_SESSION_DIR", folders: [""], standard: null }, { name: "PI_CODING_AGENT_DIR", folders: ["sessions"], standard: home => join(home, ".pi", "agent") }],
 };
 /** Directories one variable may name when the text cannot tell which assignment wins (the latest ones are kept). */
@@ -68,6 +70,10 @@ export function defaultRoots(context: Pick<RootContext, "home" | "env"> = { home
     { source: "grok", path: join(home, ".grok", "sessions") },
     { source: "pi", path: env.PI_CODING_AGENT_SESSION_DIR || join(piAgentDir(home, env), "sessions") },
     { source: "pi", path: join(home, ".pi", "agent", "sessions") },
+    { source: "kimi", path: join(env.KIMI_CODE_HOME || join(home, ".kimi-code"), "sessions") },
+    { source: "kimi", path: join(home, ".kimi-code", "sessions") },
+    { source: "zcode", path: join(env.ZCODE_HOME || join(home, ".zcode"), "cli", "db") },
+    { source: "zcode", path: join(home, ".zcode", "cli", "db") },
   ];
   return roots.filter((root, index) => roots.findIndex(other => resolve(other.path) === resolve(root.path)) === index);
 }
@@ -168,7 +174,7 @@ function commandPrograms(command: unknown): string[] {
   return words.filter((word): word is string => !!word);
 }
 /** An ACP provider's CLI by its command's name: `grok`, `grok-cli`, a renamed `grok-…` binary or script. */
-const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^grok(?:$|[-_.])/i, "grok"], [/^pi(?:$|[-_.])/, "pi"]];
+const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^kimi(?:$|[-_.])/i, "kimi"], [/^zcode(?:$|[-_.])/i, "zcode"], [/^grok(?:$|[-_.])/i, "grok"], [/^pi(?:$|[-_.])/, "pi"]];
 /**
  * The log format a provider writes: its own id or the built-in it extends (`claude`, `codex`, `pi`); for an ACP provider
  * (`extends: "acp"`) the CLI its command runs (2.14), past `env`, assignments and interpreters (`commandPrograms`). Null for
@@ -176,7 +182,7 @@ const ACP_COMMANDS: ReadonlyArray<[RegExp, TokenSource]> = [[/^grok(?:$|[-_.])/i
  */
 export function providerSource(id: string, entry: { extends?: unknown; command?: unknown }): TokenSource | null {
   const base = typeof entry.extends === "string" && entry.extends.trim() ? entry.extends.trim() : id;
-  if (base === "claude" || base === "codex" || base === "pi") return base;
+  if (base === "claude" || base === "codex" || base === "pi" || base === "kimi" || base === "zcode") return base;
   if (base !== "acp") return null;
   for (const word of commandPrograms(entry.command)) {
     const name = basename(word), source = ACP_COMMANDS.find(([pattern]) => pattern.test(name))?.[1];

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Token board and execution review: add Kimi Code wire logs (including subagents) and read-only ZCode SQLite/WAL completed-step usage, with cache normalization, incremental cursors and ACP session attribution. Provider history is never modified; unavailable sources report coverage errors.
+- ZCode session lookup also covers custom provider definitions and sessions beyond the checkpoint index; an identity check detects reused SQLite rowids after history deletion. The standalone UI build preserves Hermes compatibility and has reproducibility and mobile-compiler checks.
+
 ## 2.18.0 · 2026-10-28
 
 **Looping and stuck turns (new, after Cindy's loop guard)**

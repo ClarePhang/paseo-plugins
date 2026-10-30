@@ -23,10 +23,10 @@ test("default roots follow the daemon's environment, then the standard locations
   assert.deepEqual(defaultRoots({ home: HOME, env: {} }), [
     { source: "claude", path: "/home/user/.claude/projects" }, { source: "claude", path: "/home/user/.config/claude/projects" },
     { source: "codex", path: "/home/user/.codex/sessions" }, { source: "codex", path: "/home/user/.codex/archived_sessions" },
-    { source: "grok", path: "/home/user/.grok/sessions" }, { source: "pi", path: "/home/user/.pi/agent/sessions" }]);
+    { source: "grok", path: "/home/user/.grok/sessions" }, { source: "pi", path: "/home/user/.pi/agent/sessions" }, { source: "kimi", path: "/home/user/.kimi-code/sessions" }, { source: "zcode", path: "/home/user/.zcode/cli/db" }]);
   assert.deepEqual(defaultRoots({ home: HOME, env: { CLAUDE_CONFIG_DIR: "/srv/claude", CODEX_HOME: "/srv/codex", GROK_HOME: "/srv/grok", PI_CODING_AGENT_DIR: "/srv/pi" } }).map(root => root.path),
     ["/srv/claude/projects", "/home/user/.claude/projects", "/home/user/.config/claude/projects", "/srv/codex/sessions", "/srv/codex/archived_sessions",
-      "/srv/grok/sessions", "/home/user/.grok/sessions", "/srv/pi/sessions", "/home/user/.pi/agent/sessions"]);
+      "/srv/grok/sessions", "/home/user/.grok/sessions", "/srv/pi/sessions", "/home/user/.pi/agent/sessions", "/home/user/.kimi-code/sessions", "/home/user/.zcode/cli/db"]);
   // Pi's session directory can be named itself; it wins over the agent directory.
   assert.deepEqual(defaultRoots({ home: HOME, env: { PI_CODING_AGENT_DIR: "/srv/pi", PI_CODING_AGENT_SESSION_DIR: "/srv/pi-sessions" } }).filter(root => root.source === "pi").map(root => root.path),
     ["/srv/pi-sessions", "/home/user/.pi/agent/sessions"]);
@@ -53,7 +53,7 @@ test("a provider writes Claude Code, Codex, Pi or Grok CLI logs when it is one o
   assert.equal(providerSource("my-grok", { extends: "acp", command: ["/opt/bin/grok", "agent", "stdio"] }), "grok");
   assert.equal(providerSource("grok-team", { extends: "acp", command: ["grok-cli", "agent", "stdio"] }), "grok");
   assert.equal(providerSource("xai", { extends: "acp", command: ["/home/me/bin/grok-wrapper", "agent", "stdio"] }), "grok");
-  assert.equal(providerSource("kimi", { extends: "acp", command: ["kimi", "acp"] }), null);
+  assert.equal(providerSource("kimi", { extends: "acp", command: ["kimi", "acp"] }), "kimi");
   assert.equal(providerSource("pipx-tool", { extends: "acp", command: ["pipx", "run", "x"] }), null, "a command merely starting with pi is not Pi");
   assert.equal(providerSource("grok", { extends: "acp" }), null, "an ACP provider is known by its command, not its id");
 });
@@ -327,7 +327,7 @@ test("an ACP provider is known by the CLI it runs past env, assignments, interpr
   assert.equal(providerSource("grok-login", { extends: "acp", command: ["/usr/bin/env", "bash", "-l", "/home/me/bin/grok-acp.sh"] }), "grok");
   assert.equal(providerSource("grok-inline", { extends: "acp", command: ["bash", "-c", "export GROK_HOME=/home/me/.grok-x; cd /home/me && exec \"grok\" --acp"] }), "grok");
   assert.equal(providerSource("pi-env", { extends: "acp", command: ["env", "-i", "PI_CODING_AGENT_DIR=/home/me/.pi-x", "pi", "--mode", "acp"] }), "pi");
-  for (const command of [["env", "FOO=1", "kimi", "acp"], ["bash", "/home/me/bin/agent.sh"], ["env", "pipx", "run", "x"], ["env", "GROK_HOME=/x"], ["bash", "-c", "echo grok; exec kimi acp"]]) {
+  for (const command of [["env", "FOO=1", "unsupported-agent", "acp"], ["bash", "/home/me/bin/agent.sh"], ["env", "pipx", "run", "x"], ["env", "GROK_HOME=/x"], ["bash", "-c", "echo grok; exec unsupported-agent acp"]]) {
     assert.equal(providerSource("other", { extends: "acp", command }), null, command.join(" "));
   }
   const texts: Record<string, string> = { "/home/me/bin/grok-acp.sh": "#!/bin/sh\nexport GROK_HOME=/home/me/.grok-alt\nexec grok --acp \"$@\"\n" };
