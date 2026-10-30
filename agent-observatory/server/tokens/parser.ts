@@ -1,18 +1,14 @@
-import { createHash } from "node:crypto";
 import { basename, dirname } from "node:path";
 import type { TokenSource } from "../../shared/tokens";
+import { parseKimiLine } from "./kimi-parser";
 import type { Candidate, CallSink, LedgerCall, LogFile, ParserState } from "./types";
+import { callKey, count, object, text, validStart, type ObjectValue } from "./values";
+export { callKey, validStart } from "./values";
 
-type ObjectValue = Record<string, unknown>;
-const object = (value: unknown): ObjectValue => value && typeof value === "object" && !Array.isArray(value) ? value as ObjectValue : {};
-const text = (value: unknown, limit = 256): string => typeof value === "string" ? value.slice(0, limit) : "";
-const count = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 const stamp = (value: unknown): number | null => {
   const at = typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
   return Number.isFinite(at) && at >= 0 ? at : null;
 };
-export const callKey = (parts: unknown[]): string => createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
-export const validStart = (start: number | null, at: number): number | null => start !== null && at - start >= 100 && at - start <= 900_000 ? start : null;
 /**
  * The thread that spawned a Codex subagent rollout: `session_meta.payload.source.subagent.thread_spawn.parent_thread_id`
  * (`source.subagent.parent_thread_id` in some versions). Top-level sessions have a string source ("cli", "vscode", "exec").
@@ -45,6 +41,7 @@ export function initialParser(path: string, parentSession: string | null, source
   const clineSession = source === "cline" || source === "roo" || source === "kilo" ? basename(dirname(path)) : null;
   let sessionId: string;
   if (parentSession) sessionId = parentSession;
+  else if (source === "kimi") sessionId = basename(dirname(dirname(dirname(path))));
   else if (grok) sessionId = basename(dirname(path));
   else if (opencodeSession !== null) sessionId = opencodeSession;
   else if (clineSession !== null) sessionId = clineSession;
@@ -421,6 +418,7 @@ export function parseDshLedger(content: string, file: LogFile, sink: CallSink): 
 
 /** A cheap discriminator precedes JSON.parse; parsed objects never escape this function. */
 export function parseLine(line: string, file: LogFile, sink: CallSink): void {
+  if (file.source === "kimi") { parseKimiLine(line, file, sink); return; }
   if (file.source === "pi" || file.source === "omp") { parsePiLine(line, file, sink); return; }
   if (file.source === "qoder") { parseQoderLine(line, file, sink); return; }
   if (file.source === "codebuddy") { parseCodebuddyLine(line, file, sink); return; }

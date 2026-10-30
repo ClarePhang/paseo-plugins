@@ -6,10 +6,12 @@ import { setTimeout as delay } from "node:timers/promises";
 import { TOKEN_SOURCES, type TokenSource } from "../../shared/tokens";
 import type { TokenCall, TokenCallSource } from "../token-source";
 import type { TokenIngester } from "./ingester";
-import { initialParser, validStart } from "./parser";
+import { initialParser } from "./parser";
+import { validStart } from "./values";
 import { isMimoDb, isOpendencodeDb, readOpendencodeDb } from "./opencode-db";
 import { isHermesDb, readHermesStateDb } from "./hermes-db";
 import { tailFile } from "./reader";
+import { zcodeSessionIds } from "./zcode-reader";
 import { safeError, type Candidate, type LogFile, type ParserState } from "./types";
 
 /**
@@ -57,6 +59,7 @@ function freshFile(file: LogFile): LogFile {
 function copy(candidate: Candidate): Candidate { return { forked: candidate.forked, call: { ...candidate.call } }; }
 const databaseReader = (file: LogFile) => isOpendencodeDb(file) || isMimoDb(file) ? readOpendencodeDb : isHermesDb(file) ? readHermesStateDb : null;
 function merge(previous: Candidate, next: Candidate, contiguous = false): Candidate {
+  if (next.call.source === "kimi") return copy(next); // A corrected usage.record replaces the same request sample.
   if (previous.forked !== next.forked) return copy(previous.forked ? next : previous);
   const at = Math.max(previous.call.at, next.call.at);
   return { forked: previous.forked, call: { ...previous.call, at,
@@ -314,11 +317,11 @@ export class LocalTokenCallSource implements TokenCallSource {
     try {
       const details = await stat(file.path);
       if (!details.isFile()) { this.drop(file.path); return null; }
-      if (entry && details.dev === entry.file.dev && details.ino === entry.file.ino && details.size === entry.file.size && details.mtimeMs === entry.file.mtime) {
+      if (file.source !== "zcode" && entry && details.dev === entry.file.dev && details.ino === entry.file.ino && details.size === entry.file.size && details.mtimeMs === entry.file.mtime) {
         this.diagnostics.reused++; this.touch(entry); return entry;
       }
-      if (!entry || details.dev !== entry.file.dev || details.ino !== entry.file.ino || details.size < entry.file.size || details.size < entry.file.offset ||
-          (details.size === entry.file.size && details.mtimeMs !== entry.file.mtime)) entry = { file: freshFile(file), calls: new Map() };
+      if (!entry || details.dev !== entry.file.dev || details.ino !== entry.file.ino || (file.source !== "zcode" && (details.size < entry.file.size || details.size < entry.file.offset ||
+          (details.size === entry.file.size && details.mtimeMs !== entry.file.mtime)))) entry = { file: freshFile(file), calls: new Map() };
       const current = entry;
       let parsedState = current.file.state;
       const reconcileReset = () => {
@@ -346,16 +349,35 @@ export class LocalTokenCallSource implements TokenCallSource {
     if (!sessionIds.length) return null;
     const files = [...this.ingester.files.values()].filter(file => this.sources.has(file.source)), discovered = new Map<string, ParserState>();
     const databases = files.filter(file => databaseReader(file));
+    const discoverZcode = async (file: LogFile, ids: readonly string[]): Promise<boolean> => {
+      const indexed = this.links(file, discovered).ids, missing = ids.filter(id => !indexed.includes(id));
+      if (!missing.length) return false;
+      try {
+        const matched = await zcodeSessionIds(file, missing);
+        if (!matched.length) return false;
+        const state = discovered.get(file.path) ?? file.state;
+        discovered.set(file.path, { ...state, sessions: [...state.sessions, ...matched] });
+        return true;
+      } catch (error) {
+        const root = this.ingester.roots[file.root];
+        if (root) root.error = safeError(error);
+        return false;
+      }
+    };
     let source: TokenSource | undefined;
     // TokenCallSource has one source. Mixed-provider requests use the first requested known provider session.
     for (const id of sessionIds) {
       const known = files.find(file => { if (databaseReader(file)) return false; const links = this.links(file, discovered); return links.ids.includes(id) || links.links.includes(id); });
       if (known) { source = known.source; break; }
-      // The persisted parser remembers only a bounded list of session ids. Query older database sessions directly.
-      for (const file of databases) if ((await this.readDatabase(file, new Set([id])))?.calls.size) { source = file.source; break; }
+      // Resolve every database's bounded-index miss before moving to the next requested id, preserving provider order.
+      for (const file of files) {
+        if (databaseReader(file) ? (await this.readDatabase(file, new Set([id])))?.calls.size
+          : file.source === "zcode" && await discoverZcode(file, [id])) { source = file.source; break; }
+      }
       if (source) break;
     }
     if (!source) { this.trim(new Set()); return null; }
+    if (source === "zcode") for (const file of files) if (file.source === "zcode") await discoverZcode(file, sessionIds);
     const merged = new Map<string, OwnedCandidate>(), read = new Set<string>(), identity: unknown[] = [source];
     let found = false;
     // Touch every cached log of this session group first: reading the first ones must not evict the later ones.
@@ -368,8 +390,10 @@ export class LocalTokenCallSource implements TokenCallSource {
         const entry = await this.read(file, new Set(sessionIds));
         if (!entry) continue;
         found = true; discovered.set(file.path, entry.file.state);
-        identity.push([file.path, entry.file.dev, entry.file.ino, entry.file.size, entry.file.mtime, entry.file.offset, entry.calls.size, entry.databaseIdentity]);
+        identity.push([file.path, entry.file.dev, entry.file.ino, entry.file.size, entry.file.mtime, entry.file.offset, entry.file.state.zcode, entry.calls.size, entry.databaseIdentity]);
         for (const candidate of entry.calls.values()) {
+          // SQLite contains every ZCode session, not just the requested agent.
+          if (source === "zcode" && !sessionIds.includes(candidate.call.sessionId)) continue;
           const before = merged.get(candidate.call.key);
           if (!before || (before.candidate.forked && !candidate.forked)) merged.set(candidate.call.key, { candidate: copy(candidate), path: file.path });
           else if (before.path === file.path) before.candidate = merge(before.candidate, candidate);
