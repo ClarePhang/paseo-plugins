@@ -44,6 +44,7 @@ import { bridgeLabelHost, registerSidebarLabels, SidebarLabels } from "./server/
 import { registerCacheClock } from "./server/cache-clock";
 import { providerBasesReader } from "./server/provider-bases";
 import { registerRecaps } from "./server/recap";
+import { createBotsContractExporter } from "./server/bots-contract-export";
 
 /** How the host recorded the end of a closed Agent's last turn (its attention, kept after the close); null when it shows none. */
 async function closedTurnEnd(paseo: PaseoApi, agentId: string): Promise<{ at: string; outcome: "completed" | "failed" } | null> {
@@ -132,6 +133,9 @@ export default function contribute(host: PluginServerContext) {
     // While the chime is on, the summary carries its events (shared/alerts.ts).
     alerts: () => alerts,
   });
+  // bots-contract/v1 快照（P2-契约）：停因 + 需要处理 原子写入 $PASEO_HOME/plugin-data/bots-contract/，60s 一次（失败只告警）。
+  const botsExport = createBotsContractExporter({ sources: { telemetry: () => telemetry.snapshot(), attention: () => attention.summary().catch(() => null) } });
+  botsExport.start();
   // 同步到侧栏标签: the same 需要处理 rules, written into the host's own workspace labels over the plugin's session.
   const labels = new SidebarLabels({
     host: () => daemon ? bridgeLabelHost(bridge, daemon) : null,
@@ -236,6 +240,7 @@ export default function contribute(host: PluginServerContext) {
     statsClosed = true;
     replyCheck.close();
     attention.close();
+    botsExport.stop();
     for (const remove of statsRemovers) remove();
     for (const remove of removers) remove();
     hub.close();
